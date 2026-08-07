@@ -60,12 +60,14 @@ finally {
     Remove-Item -LiteralPath $configProbe -Force -ErrorAction SilentlyContinue
 }
 
-# A parent cmd.exe starts a child PowerShell.  The hard timeout must kill both.
+# A parent PowerShell starts a child PowerShell. The parent script uses an
+# explicit quoted command line so this check remains valid from a checkout
+# whose path contains spaces. The hard timeout must kill both processes.
 $childPidFile = Join-Path $env:TEMP ("imgpaste-child-{0}.txt" -f [Guid]::NewGuid())
 $childScript = Join-Path $PSScriptRoot "child-sleeper.ps1"
-$command = "Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-File','$childScript','-PidFile','$childPidFile'); Start-Sleep -Seconds 30"
+$parentScript = Join-Path $PSScriptRoot "child-tree-parent.ps1"
 $timer = [Diagnostics.Stopwatch]::StartNew()
-$timeout = Invoke-ImgPasteProcess -FilePath "powershell.exe" -Arguments @("-NoProfile", "-Command", $command) -TimeoutSeconds 3 -Label "process-tree timeout test"
+$timeout = Invoke-ImgPasteProcess -FilePath "powershell.exe" -Arguments @("-NoProfile", "-File", $parentScript, "-ChildScript", $childScript, "-PidFile", $childPidFile) -TimeoutSeconds 3 -Label "process-tree timeout test"
 $timer.Stop()
 Assert-ImgPaste $timeout.TimedOut "Expected process-tree command to time out."
 Assert-ImgPaste ($timer.Elapsed.TotalSeconds -lt 9) "Timeout took too long: $($timer.Elapsed.TotalSeconds)s"

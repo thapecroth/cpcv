@@ -44,6 +44,7 @@ Thanks for considering a contribution.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-process-timeout.ps1
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-windows-e2e.ps1
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-tray.ps1
 ```
 

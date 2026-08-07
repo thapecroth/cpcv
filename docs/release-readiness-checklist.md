@@ -18,7 +18,8 @@ candidate. It does not authorize making a repository public.
 
 ## Behavior and reliability
 
-- [ ] Windows safe core, timeout, and tray tests pass.
+- [ ] Windows safe core, timeout, isolated end-to-end upload, and tray tests
+      pass.
 - [ ] If claiming macOS support, native parse/build and network-free behavior
       tests pass.
 - [ ] A deliberately hung SSH child tree is terminated at the hard deadline on
@@ -40,6 +41,9 @@ candidate. It does not authorize making a repository public.
       `io.imgpaste.*` jobs and never creates a root LaunchDaemon.
 - [ ] The tray status is bounded and redacted, and every control action targets
       the current checkout/service only.
+- [ ] The Windows dashboard and branded tray icon have been visually inspected
+      at a normal desktop scale; no subtitle, status, or primary action is
+      clipped.
 - [ ] A fresh authorized user session for each claimed platform can install,
       start, inspect status, stop, restart, and uninstall without administrator
       privileges.
@@ -50,6 +54,9 @@ candidate. It does not authorize making a repository public.
       visibility have been reviewed.
 - [ ] Candidate CI is green; skipped private-only security products are recorded
       as skipped, not as passed.
+- [ ] The Windows archive was produced from a clean committed tree, contains
+      the branded assets, excludes private runtime state, and passes its safe
+      extracted-source checks.
 - [ ] A live SSH transfer is called successful only when run against an
       authorized host and documented separately from network-free tests.
 - [ ] Do not publish unsigned binary artifacts as production releases. Before

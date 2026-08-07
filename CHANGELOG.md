@@ -15,6 +15,11 @@ fixes increment the patch version.
 - Bounds for individual clipboard images and retained local cache bytes.
 - An optional Windows notification-area tray with bounded/redacted status and
   scoped local controls.
+- An original imgpaste application mark, transparent dashboard logo, and
+  multi-resolution Windows tray icon.
+- A reproducible `build-windows.ps1` archive build that packages only committed
+  source and validates required branded assets.
+- An isolated Windows end-to-end upload test with local SSH/SCP stand-ins.
 - A source-installed macOS 11+ native AppKit clipboard watcher, per-user
   guardian, fixed-action controller, and optional menu-bar companion.
 - Private-first Windows/macOS tray, testing, and clean-tree export
@@ -32,6 +37,9 @@ fixes increment the patch version.
   service.
 - The tray is documented as a bounded/redacted local control client rather than
   a second uploader.
+- The Windows status experience is now a modern dashboard with a clear health
+  banner, activity cards, context-sensitive recovery guidance, and grouped
+  quick actions.
 
 ### Fixed
 
@@ -43,6 +51,12 @@ fixes increment the patch version.
   startup resources unless they can prove ownership.
 - macOS log and menu-bar redaction now covers HTTP basic-auth URLs, sensitive
   headers/cookies, and common token/key/value forms.
+- Windows guardian recovery now waits for a stopped watcher to release its
+  mutex before starting its replacement; its live test waits for a matching
+  fresh heartbeat rather than a fixed delay.
+- Windows guardian launch and child-tree timeout coverage now preserve script
+  paths containing spaces, including a portable archive extracted to such a
+  path.
 
 ## Release process
 

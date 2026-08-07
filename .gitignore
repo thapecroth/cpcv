@@ -30,3 +30,6 @@ config.json
 # Local macOS build output. The installer compiles a per-user executable here;
 # source and checked-in LaunchAgent templates remain in macos/.
 macos/build/
+
+# Reproducible local Windows source archives from build-windows.ps1.
+build/

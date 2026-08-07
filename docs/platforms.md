@@ -70,8 +70,12 @@ The tray is a local status/control client, never a second uploader.
 
 Both interfaces show bounded, redacted state and can request a one-shot upload,
 copy the last validated remote path, start/stop/restart the local service, and
-open local diagnostics. They never accept arbitrary commands, expose raw SSH
-output in a tooltip, or hold SSH credentials.
+open local diagnostics. On Windows, **View status** opens a dashboard with a
+clear health banner, automatic-upload/heartbeat/latest-image cards, an
+explicit refresh control, and context-sensitive recovery guidance. It keeps
+remote paths out of casual display; use **Copy latest path** when you need it.
+Neither interface accepts arbitrary commands, exposes raw SSH output in a
+tooltip, or holds SSH credentials.
 
 ## Reliability and security invariants
 

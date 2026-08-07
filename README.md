@@ -94,6 +94,22 @@ Set `HostAlias` in the config to `image-box`, or another usable SSH target.
 The default stable remote path is `~/clipboard-images/latest.png`. Screenshot
 or copy an image, wait roughly two seconds, then paste the remote path.
 
+#### Build a portable Windows archive
+
+The Windows version is intentionally transparent PowerShell, not an opaque
+third-party wrapper. From a clean checkout, build a ZIP containing only the
+committed source tree:
+
+```powershell
+.\build-windows.ps1
+```
+
+The command writes `build\imgpaste-windows-<commit>.zip`, checks that the
+archive contains the Windows runtime files, and refuses to include local
+configuration, screenshots, cache, logs, or Git metadata. The archive is a
+portable source distribution; extract it, create the private configuration,
+then run `install-autostart.ps1` and optionally `install-tray.ps1`.
+
 ### macOS
 
 Install Xcode Command Line Tools if necessary, create a private JSON
@@ -368,6 +384,7 @@ host or read a real clipboard in CI:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-process-timeout.ps1
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-windows-e2e.ps1
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-tray.ps1
 ```
 
@@ -382,6 +399,9 @@ builds the native sources and exercises a synthetic child-process timeout; it
 does not read a real clipboard or contact an SSH host. The CodeQL workflow is
 intentionally skipped on private repositories unless the owner enables the
 required GitHub Code Security capability; a skipped scan is not a passing scan.
+The Windows end-to-end test uses temporary local `ssh.exe`/`scp.exe` stand-ins
+to verify the real upload process, remote-latest update, failure, and recovery
+without accessing a real host or changing your clipboard.
 
 ## Contributing, security, releases, and license
 

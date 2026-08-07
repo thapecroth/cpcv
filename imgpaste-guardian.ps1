@@ -29,8 +29,28 @@ function Get-ImgPasteWatchProcess {
 
 function Start-ImgPasteWatch {
     $watch = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-watch.ps1"))
-    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-STA", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", $watch) -WindowStyle Hidden
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-STA", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", ('"{0}"' -f $watch)) -WindowStyle Hidden
     Write-ImgPasteLog "guardian started watcher"
+}
+
+function Wait-ImgPasteWatchExit {
+    param(
+        [Parameter(Mandatory)][int[]]$ProcessIds,
+        [ValidateRange(1, 30)][int]$TimeoutSeconds = 8
+    )
+
+    # taskkill is normally synchronous, but a just-terminated PowerShell
+    # process can briefly retain its named mutex. Starting its replacement
+    # during that window would make the replacement exit harmlessly and defer
+    # recovery until the next watchdog cycle. Wait only for the PIDs we chose
+    # to stop, never for an unrelated checkout's watcher.
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $remaining = @(Get-ImgPasteWatchProcess | Where-Object { $ProcessIds -contains [int]$_.ProcessId })
+        if ($remaining.Count -eq 0) { return $true }
+        Start-Sleep -Milliseconds 250
+    } while ((Get-Date) -lt $deadline)
+    return $false
 }
 
 Write-ImgPasteLog "guardian started (pid=$PID, stale=${StaleSeconds}s)"
@@ -57,11 +77,14 @@ try {
             Start-ImgPasteWatch
         }
         elseif ($stale -or $watchers.Count -gt 1) {
+            $watcherIds = @($watchers | ForEach-Object { [int]$_.ProcessId })
             foreach ($watcher in $watchers) { Stop-ImgPasteProcessTree -ProcessId $watcher.ProcessId }
             $ageText = if ($null -ne $heartbeatAge) { "$([Math]::Round($heartbeatAge))s" } else { "missing" }
             $reason = if ($watchers.Count -gt 1) { "duplicate watcher(s)" } elseif (-not $heartbeatValid) { "invalid heartbeat" } else { "stale heartbeat" }
             Write-ImgPasteLog "guardian restarted $reason; heartbeat age=$ageText"
-            Start-Sleep -Seconds 2
+            if (-not (Wait-ImgPasteWatchExit -ProcessIds $watcherIds)) {
+                Write-ImgPasteLog "guardian timed out waiting for stopped watcher process(es); attempting guarded replacement"
+            }
             Start-ImgPasteWatch
         }
         Start-Sleep -Seconds $CheckSeconds

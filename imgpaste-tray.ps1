@@ -178,9 +178,281 @@ function Get-ImgPasteTrayTooltip {
     param([Parameter(Mandatory)]$State)
     # NotifyIcon accepts at most 63 characters.  Do not put hosts, paths, or
     # log details in a system-wide hover tooltip.
-    $text = "imgpaste: $($State.Level) - $($State.Summary)"
+    $text = "imgpaste: $($State.Level) - $(ConvertTo-ImgPasteTrayDisplayText -Text $State.Summary -MaximumLength 42)"
     if ($text.Length -gt 63) { return $text.Substring(0, 60) + "..." }
     return $text
+}
+
+function ConvertTo-ImgPasteTrayDisplayText {
+    param(
+        [AllowNull()][string]$Text,
+        [ValidateRange(24, 2048)][int]$MaximumLength = 280
+    )
+
+    # The status dashboard is intentionally a small, local summary. Never
+    # turn a subprocess/configuration detail into an unbounded or credential-
+    # bearing UI string, even if a future caller changes the state source.
+    $safe = Protect-ImgPasteLogDetail $Text
+    $safe = ($safe -replace '[\r\n\t]+', ' ').Trim()
+    if ($safe.Length -gt $MaximumLength) { return $safe.Substring(0, $MaximumLength - 1) + [char]0x2026 }
+    return $safe
+}
+
+function Get-ImgPasteTrayStatusStyle {
+    param([Parameter(Mandatory)][string]$Level)
+
+    switch ($Level) {
+        "Healthy" { return [pscustomobject]@{ Accent = "#0F766E"; Surface = "#ECFDF5"; Foreground = "#115E59"; Badge = "Healthy" } }
+        "Warning" { return [pscustomobject]@{ Accent = "#B45309"; Surface = "#FFFBEB"; Foreground = "#92400E"; Badge = "Needs attention" } }
+        "Error" { return [pscustomobject]@{ Accent = "#B91C1C"; Surface = "#FEF2F2"; Foreground = "#991B1B"; Badge = "Action needed" } }
+        "Stopped" { return [pscustomobject]@{ Accent = "#475569"; Surface = "#F1F5F9"; Foreground = "#334155"; Badge = "Stopped" } }
+        default { return [pscustomobject]@{ Accent = "#4F46E5"; Surface = "#EEF2FF"; Foreground = "#3730A3"; Badge = "Checking" } }
+    }
+}
+
+function Get-ImgPasteTrayRelativeTimeText {
+    param([AllowNull()][object]$AgeSeconds)
+
+    if ($null -eq $AgeSeconds) { return "Waiting for first heartbeat" }
+    try { $seconds = [Math]::Max(0, [Math]::Round([double]$AgeSeconds)) }
+    catch { return "Waiting for first heartbeat" }
+    if ($seconds -lt 2) { return "Just now" }
+    if ($seconds -lt 60) { return "$seconds seconds ago" }
+    $minutes = [Math]::Floor($seconds / 60)
+    if ($minutes -lt 60) { return "${minutes} min ago" }
+    $hours = [Math]::Floor($minutes / 60)
+    if ($hours -lt 24) { return "${hours} hr ago" }
+    $days = [Math]::Floor($hours / 24)
+    return "${days} day$($(if ($days -eq 1) { '' } else { 's' })) ago"
+}
+
+function Get-ImgPasteTrayGuidance {
+    param([Parameter(Mandatory)]$State)
+
+    switch ($State.Level) {
+        "Healthy" { return "Take screenshots as usual. imgpaste will upload new clipboard images automatically." }
+        "Stopped" { return "Start automatic uploads to resume watching the image clipboard." }
+        "Error" { return "Open settings, correct the local configuration, then start the service." }
+        "Warning" { return "Use Repair service if this does not clear after the next health check." }
+        default { return "Refresh status after local process inspection becomes available." }
+    }
+}
+
+function Get-ImgPasteTrayColor {
+    param([Parameter(Mandatory)][string]$Hex)
+    return [System.Drawing.ColorTranslator]::FromHtml($Hex)
+}
+
+function Set-ImgPasteTrayButtonStyle {
+    param(
+        [Parameter(Mandatory)][System.Windows.Forms.Button]$Button,
+        [ValidateSet("Primary", "Secondary", "Quiet")][string]$Kind = "Secondary"
+    )
+
+    $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $Button.FlatAppearance.BorderSize = 1
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $Button.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
+    switch ($Kind) {
+        "Primary" {
+            $Button.BackColor = Get-ImgPasteTrayColor "#2563EB"
+            $Button.ForeColor = [System.Drawing.Color]::White
+            $Button.FlatAppearance.BorderColor = Get-ImgPasteTrayColor "#2563EB"
+            $Button.FlatAppearance.MouseOverBackColor = Get-ImgPasteTrayColor "#1D4ED8"
+            $Button.FlatAppearance.MouseDownBackColor = Get-ImgPasteTrayColor "#1E40AF"
+        }
+        "Quiet" {
+            $Button.BackColor = Get-ImgPasteTrayColor "#F8FAFC"
+            $Button.ForeColor = Get-ImgPasteTrayColor "#334155"
+            $Button.FlatAppearance.BorderColor = Get-ImgPasteTrayColor "#CBD5E1"
+            $Button.FlatAppearance.MouseOverBackColor = Get-ImgPasteTrayColor "#E2E8F0"
+            $Button.FlatAppearance.MouseDownBackColor = Get-ImgPasteTrayColor "#CBD5E1"
+        }
+        default {
+            $Button.BackColor = [System.Drawing.Color]::White
+            $Button.ForeColor = Get-ImgPasteTrayColor "#1E3A5F"
+            $Button.FlatAppearance.BorderColor = Get-ImgPasteTrayColor "#93C5FD"
+            $Button.FlatAppearance.MouseOverBackColor = Get-ImgPasteTrayColor "#EFF6FF"
+            $Button.FlatAppearance.MouseDownBackColor = Get-ImgPasteTrayColor "#DBEAFE"
+        }
+    }
+}
+
+function New-ImgPasteTrayMetricCard {
+    param([Parameter(Mandatory)][string]$Title)
+
+    $border = New-Object System.Windows.Forms.Panel
+    $border.BackColor = Get-ImgPasteTrayColor "#D9E2F0"
+    $border.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $border.Padding = New-Object System.Windows.Forms.Padding(1)
+
+    $content = New-Object System.Windows.Forms.Panel
+    $content.BackColor = [System.Drawing.Color]::White
+    $content.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $content.Padding = New-Object System.Windows.Forms.Padding(14, 12, 14, 10)
+    $border.Controls.Add($content)
+
+    $titleLabel = New-Object System.Windows.Forms.Label
+    $titleLabel.Text = $Title.ToUpperInvariant()
+    $titleLabel.AutoSize = $true
+    $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8)
+    $titleLabel.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $titleLabel.Location = New-Object System.Drawing.Point(14, 12)
+    $content.Controls.Add($titleLabel)
+
+    $valueLabel = New-Object System.Windows.Forms.Label
+    $valueLabel.AutoEllipsis = $true
+    $valueLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
+    $valueLabel.ForeColor = Get-ImgPasteTrayColor "#0F172A"
+    $valueLabel.Location = New-Object System.Drawing.Point(14, 33)
+    $valueLabel.Size = New-Object System.Drawing.Size(215, 26)
+    $content.Controls.Add($valueLabel)
+
+    $detailLabel = New-Object System.Windows.Forms.Label
+    $detailLabel.AutoEllipsis = $true
+    $detailLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    $detailLabel.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $detailLabel.Location = New-Object System.Drawing.Point(14, 62)
+    $detailLabel.Size = New-Object System.Drawing.Size(215, 19)
+    $content.Controls.Add($detailLabel)
+
+    return [pscustomobject]@{ Container = $border; Value = $valueLabel; Detail = $detailLabel }
+}
+
+function Get-ImgPasteTrayIconAssetPath {
+    # Keep branding with the checked-in source rather than a user profile or
+    # configuration value. A custom icon must never become another input that
+    # can point the tray at an arbitrary local file.
+    return (Join-Path $PSScriptRoot "assets\windows\imgpaste-tray.ico")
+}
+
+function Get-ImgPasteTrayLogoAssetPath {
+    # The dashboard logo is also a checked-in project asset, not a configured
+    # local path. That keeps the UI deterministic and avoids another
+    # filesystem input in a process that starts at logon.
+    return (Join-Path $PSScriptRoot "assets\windows\imgpaste-logo.png")
+}
+
+function Get-ImgPasteTrayLogo {
+    [CmdletBinding()]
+    param(
+        [string]$LogoPath = (Get-ImgPasteTrayLogoAssetPath)
+    )
+
+    $bitmap = $null
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($LogoPath) -or -not (Test-Path -LiteralPath $LogoPath -PathType Leaf)) { return $null }
+        $item = Get-Item -LiteralPath $LogoPath -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+            [IO.Path]::GetExtension($item.Name) -ine ".png" -or $item.Length -lt 128 -or $item.Length -gt 2MB) {
+            return $null
+        }
+
+        # Clone the image before closing the stream so the dashboard neither
+        # locks the checkout nor keeps a handle to a partially read asset.
+        $stream = [IO.File]::Open($item.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            $source = [System.Drawing.Image]::FromStream($stream, $true, $true)
+            try { $bitmap = [System.Drawing.Bitmap]::new($source) }
+            finally { $source.Dispose() }
+        }
+        finally { $stream.Dispose() }
+        if ($bitmap.Width -lt 32 -or $bitmap.Height -lt 32 -or $bitmap.Width -gt 2048 -or $bitmap.Height -gt 2048) {
+            $bitmap.Dispose()
+            return $null
+        }
+        return $bitmap
+    }
+    catch {
+        if ($bitmap) { $bitmap.Dispose() }
+        # The logo is cosmetic. A bad local asset must never stop the status
+        # controller or disclose a raw GDI+/filesystem error in the UI.
+        return $null
+    }
+}
+
+function Get-ImgPasteTrayIcon {
+    [CmdletBinding()]
+    param(
+        # This is overridable only so the local-only tests can exercise bad
+        # assets without changing a real checkout. Production callers use the
+        # project-local default above.
+        [string]$IconPath = (Get-ImgPasteTrayIconAssetPath)
+    )
+
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $fallback = [System.Drawing.SystemIcons]::Application
+    }
+    catch {
+        throw "imgpaste tray icons require the Windows System.Drawing assembly."
+    }
+    $fallbackResult = {
+        param([string]$Reason)
+        return [pscustomobject]@{
+            Icon = $fallback
+            OwnsIcon = $false
+            IsFallback = $true
+            Source = "Windows application icon"
+            Reason = $Reason
+        }
+    }
+    $icon = $null
+    try {
+        if ([string]::IsNullOrWhiteSpace($IconPath) -or -not (Test-Path -LiteralPath $IconPath -PathType Leaf)) {
+            return (& $fallbackResult "missing")
+        }
+
+        $item = Get-Item -LiteralPath $IconPath -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            return (& $fallbackResult "unsafe-file")
+        }
+        # An ICO with the resolutions appropriate for the notification area is
+        # normally tens of kilobytes. Bound it before GDI+ parses it, which
+        # also prevents a corrupt local asset from delaying the tray at login.
+        if ($item.Length -lt 6 -or $item.Length -gt 1MB -or [IO.Path]::GetExtension($item.Name) -ine ".ico") {
+            return (& $fallbackResult "invalid-file")
+        }
+
+        $stream = [IO.File]::Open($item.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try {
+            [byte[]]$header = [byte[]]::new(6)
+            $offset = 0
+            while ($offset -lt $header.Length) {
+                $read = $stream.Read($header, $offset, $header.Length - $offset)
+                if ($read -le 0) { break }
+                $offset += $read
+            }
+        }
+        finally {
+            $stream.Dispose()
+        }
+        if ($offset -ne 6 -or $header[0] -ne 0 -or $header[1] -ne 0 -or $header[2] -ne 1 -or $header[3] -ne 0 -or ($header[4] -eq 0 -and $header[5] -eq 0)) {
+            return (& $fallbackResult "invalid-header")
+        }
+
+        $icon = New-Object System.Drawing.Icon($item.FullName)
+        if ($icon.Width -lt 16 -or $icon.Height -lt 16 -or $icon.Width -gt 512 -or $icon.Height -gt 512) {
+            $icon.Dispose()
+            $icon = $null
+            return (& $fallbackResult "unsupported-size")
+        }
+        return [pscustomobject]@{
+            Icon = $icon
+            OwnsIcon = $true
+            IsFallback = $false
+            Source = "project asset"
+            Reason = ""
+        }
+    }
+    catch {
+        if ($icon) { $icon.Dispose() }
+        # Do not surface raw GDI+/filesystem error text: it could expose a
+        # local path in a tray-facing surface or log. The system icon is a
+        # reliable, dependency-free fallback.
+        return (& $fallbackResult "unreadable")
+    }
 }
 
 function Start-ImgPasteTrayGuardian {
@@ -272,67 +544,346 @@ function Show-ImgPasteTrayError {
 }
 
 function Show-ImgPasteTrayStatusWindow {
-    param([Parameter(Mandatory)]$State)
+    param(
+        [Parameter(Mandatory)]$State,
+        # TestMode exists solely for the local synthetic STA smoke test. It
+        # preserves the real dialog/message-loop path without flashing a
+        # status window onto the user's desktop during routine validation.
+        [switch]$TestMode
+    )
 
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "imgpaste status"
-    $form.StartPosition = "CenterScreen"
-    $form.Size = New-Object System.Drawing.Size(600, 330)
-    $form.MinimizeBox = $false
-    $form.MaximizeBox = $false
-    $form.FormBorderStyle = "FixedDialog"
+    # The normal tray startup path has already loaded these assemblies, but
+    # this public helper is also useful from a direct STA PowerShell command.
+    # Load them here so opening status does not depend on hidden caller state.
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $windowIcon = Get-ImgPasteTrayIcon
+    $logoImage = Get-ImgPasteTrayLogo
+    $form = $null
+    $tooltip = $null
+    try {
+        $form = New-Object System.Windows.Forms.Form
+        $form.Name = "imgpasteTrayStatusDashboard"
+        $form.Text = "imgpaste status"
+        $form.Icon = $windowIcon.Icon
+        $form.StartPosition = if ($TestMode) { [System.Windows.Forms.FormStartPosition]::Manual } else { [System.Windows.Forms.FormStartPosition]::CenterScreen }
+        if ($TestMode) {
+            $form.Opacity = 0
+            $form.ShowInTaskbar = $false
+            $form.Location = New-Object System.Drawing.Point(-32000, -32000)
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(840, 575)
+        $form.MinimumSize = New-Object System.Drawing.Size(760, 545)
+        $form.BackColor = Get-ImgPasteTrayColor "#F6F8FC"
+        $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+        $form.KeyPreview = $true
+        $form.MinimizeBox = $false
+        $form.MaximizeBox = $false
+        $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
 
-    $text = New-Object System.Windows.Forms.TextBox
-    $text.Multiline = $true
-    $text.ReadOnly = $true
-    $text.WordWrap = $true
-    $text.ScrollBars = "Vertical"
-    $text.BorderStyle = "None"
-    $text.BackColor = [System.Drawing.SystemColors]::Window
-    $text.Location = New-Object System.Drawing.Point(18, 18)
-    $text.Size = New-Object System.Drawing.Size(548, 220)
-    $heartbeat = if ($State.Heartbeat) {
-        "PID $($State.Heartbeat.ProcessId); $($State.Heartbeat.Status); $([Math]::Round($State.HeartbeatAgeSeconds, 1)) seconds ago"
-    } else { "not available" }
-    $text.Text = @"
-Status: $($State.Level)
-$($State.Summary)
+    $layout = New-Object System.Windows.Forms.TableLayoutPanel
+    $layout.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $layout.BackColor = $form.BackColor
+    $layout.Padding = New-Object System.Windows.Forms.Padding(24, 22, 24, 20)
+    $layout.ColumnCount = 1
+    $layout.RowCount = 5
+    # The header includes a 20pt title plus a supporting line. Its bottom
+    # margin needs real breathing room at 100% and high-DPI scale factors.
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::Absolute, 68)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::Absolute, 116)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::Absolute, 104)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::Absolute, 28)))
+    $form.Controls.Add($layout)
 
-Detail: $($State.Detail)
-Guardian processes: $((@($State.Guardians)).Count)
-Watcher processes: $((@($State.Watchers)).Count)
-Heartbeat: $heartbeat
-Latest uploaded path: $($State.LatestPath)
-Data folder: $($State.Config.DataRoot)
-"@
-    $form.Controls.Add($text)
+    $header = New-Object System.Windows.Forms.Panel
+    $header.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $header.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 10)
+    $layout.Controls.Add($header, 0, 0)
 
-    $restart = New-Object System.Windows.Forms.Button
-    $restart.Text = "Restart service"
-    $restart.Location = New-Object System.Drawing.Point(18, 252)
-    $restart.Size = New-Object System.Drawing.Size(130, 30)
-    $restart.Add_Click({
-        try { Restart-ImgPasteTrayService; $form.Close() }
-        catch { Show-ImgPasteTrayError $_.Exception.Message }
+    if ($logoImage) {
+        $logo = New-Object System.Windows.Forms.PictureBox
+        $logo.Name = "imgpasteTrayBrandLogo"
+        $logo.Image = $logoImage
+        $logo.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
+        $logo.Size = New-Object System.Drawing.Size(48, 48)
+        $logo.Location = New-Object System.Drawing.Point(0, 1)
+        $header.Controls.Add($logo)
+    }
+
+    $title = New-Object System.Windows.Forms.Label
+    $title.Text = "imgpaste"
+    $title.AutoSize = $true
+    $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
+    $title.ForeColor = Get-ImgPasteTrayColor "#0F172A"
+    $title.Location = New-Object System.Drawing.Point($(if ($logoImage) { 58 } else { 0 }), 0)
+    $header.Controls.Add($title)
+
+    $subtitle = New-Object System.Windows.Forms.Label
+    $subtitle.Text = "Clipboard image uploader"
+    $subtitle.AutoSize = $true
+    $subtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
+    $subtitle.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $subtitle.Location = New-Object System.Drawing.Point($(if ($logoImage) { 60 } else { 2 }), 34)
+    $header.Controls.Add($subtitle)
+
+    $refreshButton = New-Object System.Windows.Forms.Button
+    $refreshButton.Name = "imgpasteTrayRefreshButton"
+    $refreshButton.Text = "Refresh status"
+    $refreshButton.Size = New-Object System.Drawing.Size(120, 34)
+    $refreshButton.Location = New-Object System.Drawing.Point(672, 8)
+    $refreshButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    Set-ImgPasteTrayButtonStyle -Button $refreshButton -Kind Quiet
+    $header.Controls.Add($refreshButton)
+
+    $statusBanner = New-Object System.Windows.Forms.Panel
+    $statusBanner.Name = "imgpasteTrayStatusBanner"
+    $statusBanner.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $statusBanner.Padding = New-Object System.Windows.Forms.Padding(20, 17, 20, 14)
+    $statusBanner.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
+    $layout.Controls.Add($statusBanner, 0, 1)
+
+    $statusDot = New-Object System.Windows.Forms.Label
+    $statusDot.Text = [char]0x25CF
+    $statusDot.AutoSize = $true
+    $statusDot.Font = New-Object System.Drawing.Font("Segoe UI", 24)
+    $statusDot.Location = New-Object System.Drawing.Point(20, 37)
+    $statusBanner.Controls.Add($statusDot)
+
+    $statusBadge = New-Object System.Windows.Forms.Label
+    $statusBadge.AutoSize = $true
+    $statusBadge.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8)
+    $statusBadge.Padding = New-Object System.Windows.Forms.Padding(7, 4, 7, 4)
+    $statusBadge.Location = New-Object System.Drawing.Point(62, 17)
+    $statusBanner.Controls.Add($statusBadge)
+
+    $statusSummary = New-Object System.Windows.Forms.Label
+    $statusSummary.AutoEllipsis = $true
+    $statusSummary.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 15)
+    $statusSummary.Location = New-Object System.Drawing.Point(62, 43)
+    $statusSummary.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $statusSummary.Size = New-Object System.Drawing.Size(710, 28)
+    $statusBanner.Controls.Add($statusSummary)
+
+    $statusDetail = New-Object System.Windows.Forms.Label
+    $statusDetail.AutoEllipsis = $true
+    $statusDetail.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
+    $statusDetail.Location = New-Object System.Drawing.Point(63, 75)
+    $statusDetail.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $statusDetail.Size = New-Object System.Drawing.Size(708, 22)
+    $statusBanner.Controls.Add($statusDetail)
+
+    $metrics = New-Object System.Windows.Forms.TableLayoutPanel
+    $metrics.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $metrics.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
+    $metrics.ColumnCount = 3
+    $metrics.RowCount = 1
+    [void]$metrics.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 33.333)))
+    [void]$metrics.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 33.333)))
+    [void]$metrics.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 33.334)))
+    $layout.Controls.Add($metrics, 0, 2)
+
+    $serviceCard = New-ImgPasteTrayMetricCard -Title "Automatic uploads"
+    $heartbeatCard = New-ImgPasteTrayMetricCard -Title "Last heartbeat"
+    $latestCard = New-ImgPasteTrayMetricCard -Title "Latest image"
+    $serviceCard.Container.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
+    $heartbeatCard.Container.Margin = New-Object System.Windows.Forms.Padding(4, 0, 4, 0)
+    $latestCard.Container.Margin = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
+    $metrics.Controls.Add($serviceCard.Container, 0, 0)
+    $metrics.Controls.Add($heartbeatCard.Container, 1, 0)
+    $metrics.Controls.Add($latestCard.Container, 2, 0)
+
+    $actionsBorder = New-Object System.Windows.Forms.Panel
+    $actionsBorder.BackColor = Get-ImgPasteTrayColor "#D9E2F0"
+    $actionsBorder.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $actionsBorder.Padding = New-Object System.Windows.Forms.Padding(1)
+    $actionsBorder.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 10)
+    $layout.Controls.Add($actionsBorder, 0, 3)
+
+    $actions = New-Object System.Windows.Forms.Panel
+    $actions.BackColor = [System.Drawing.Color]::White
+    $actions.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $actions.Padding = New-Object System.Windows.Forms.Padding(20, 16, 20, 15)
+    $actionsBorder.Controls.Add($actions)
+
+    $actionsTitle = New-Object System.Windows.Forms.Label
+    $actionsTitle.Text = "Quick actions"
+    $actionsTitle.AutoSize = $true
+    $actionsTitle.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
+    $actionsTitle.ForeColor = Get-ImgPasteTrayColor "#0F172A"
+    $actionsTitle.Location = New-Object System.Drawing.Point(20, 16)
+    $actions.Controls.Add($actionsTitle)
+
+    $actionsCaption = New-Object System.Windows.Forms.Label
+    $actionsCaption.Text = "Manage this checkout only. The tray never starts a second uploader."
+    $actionsCaption.AutoSize = $true
+    $actionsCaption.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    $actionsCaption.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $actionsCaption.Location = New-Object System.Drawing.Point(20, 40)
+    $actions.Controls.Add($actionsCaption)
+
+    $uploadButton = New-Object System.Windows.Forms.Button
+    $uploadButton.Name = "imgpasteTrayUploadButton"
+    $uploadButton.Text = "Upload clipboard image"
+    $uploadButton.Size = New-Object System.Drawing.Size(206, 38)
+    $uploadButton.Location = New-Object System.Drawing.Point(20, 69)
+    Set-ImgPasteTrayButtonStyle -Button $uploadButton -Kind Primary
+    $actions.Controls.Add($uploadButton)
+
+    $copyButton = New-Object System.Windows.Forms.Button
+    $copyButton.Name = "imgpasteTrayCopyButton"
+    $copyButton.Size = New-Object System.Drawing.Size(178, 38)
+    $copyButton.Location = New-Object System.Drawing.Point(236, 69)
+    Set-ImgPasteTrayButtonStyle -Button $copyButton -Kind Secondary
+    $actions.Controls.Add($copyButton)
+
+    $serviceButton = New-Object System.Windows.Forms.Button
+    $serviceButton.Name = "imgpasteTrayServiceButton"
+    $serviceButton.Size = New-Object System.Drawing.Size(184, 38)
+    $serviceButton.Location = New-Object System.Drawing.Point(424, 69)
+    Set-ImgPasteTrayButtonStyle -Button $serviceButton -Kind Secondary
+    $actions.Controls.Add($serviceButton)
+
+    $settingsButton = New-Object System.Windows.Forms.Button
+    $settingsButton.Name = "imgpasteTraySettingsButton"
+    $settingsButton.Text = "Open settings"
+    $settingsButton.Size = New-Object System.Drawing.Size(112, 30)
+    $settingsButton.Location = New-Object System.Drawing.Point(20, 119)
+    Set-ImgPasteTrayButtonStyle -Button $settingsButton -Kind Quiet
+    $actions.Controls.Add($settingsButton)
+
+    $logButton = New-Object System.Windows.Forms.Button
+    $logButton.Name = "imgpasteTrayLogButton"
+    $logButton.Text = "Open log"
+    $logButton.Size = New-Object System.Drawing.Size(92, 30)
+    $logButton.Location = New-Object System.Drawing.Point(142, 119)
+    Set-ImgPasteTrayButtonStyle -Button $logButton -Kind Quiet
+    $actions.Controls.Add($logButton)
+
+    $dataButton = New-Object System.Windows.Forms.Button
+    $dataButton.Name = "imgpasteTrayDataButton"
+    $dataButton.Text = "Open data folder"
+    $dataButton.Size = New-Object System.Drawing.Size(128, 30)
+    $dataButton.Location = New-Object System.Drawing.Point(244, 119)
+    Set-ImgPasteTrayButtonStyle -Button $dataButton -Kind Quiet
+    $actions.Controls.Add($dataButton)
+
+    $actionFeedback = New-Object System.Windows.Forms.Label
+    $actionFeedback.AutoEllipsis = $true
+    $actionFeedback.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    $actionFeedback.ForeColor = Get-ImgPasteTrayColor "#475569"
+    $actionFeedback.Location = New-Object System.Drawing.Point(20, 158)
+    $actionFeedback.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+    $actionFeedback.Size = New-Object System.Drawing.Size(750, 20)
+    $actions.Controls.Add($actionFeedback)
+
+    $footer = New-Object System.Windows.Forms.Label
+    $footer.Text = "Tip: take a screenshot as usual; imgpaste reacts only to image clipboard entries."
+    $footer.AutoEllipsis = $true
+    $footer.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $footer.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+    $footer.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $footer.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
+    $layout.Controls.Add($footer, 0, 4)
+
+    $tooltip = New-Object System.Windows.Forms.ToolTip
+    $tooltip.AutoPopDelay = 10000
+    $tooltip.SetToolTip($uploadButton, "Run one safe, asynchronous upload of the current clipboard image.")
+    $tooltip.SetToolTip($serviceButton, "Only processes started from this checkout can be changed.")
+    $tooltip.SetToolTip($copyButton, "Copy the most recent validated remote path without displaying it here.")
+
+    $refreshDashboard = {
+        param([Parameter(Mandatory)]$CurrentState)
+
+        $style = Get-ImgPasteTrayStatusStyle -Level $CurrentState.Level
+        $statusBanner.BackColor = Get-ImgPasteTrayColor $style.Surface
+        $statusDot.ForeColor = Get-ImgPasteTrayColor $style.Accent
+        $statusBadge.Text = $style.Badge.ToUpperInvariant()
+        $statusBadge.BackColor = Get-ImgPasteTrayColor $style.Accent
+        $statusBadge.ForeColor = [System.Drawing.Color]::White
+        $statusSummary.Text = ConvertTo-ImgPasteTrayDisplayText -Text $CurrentState.Summary -MaximumLength 200
+        $statusSummary.ForeColor = Get-ImgPasteTrayColor $style.Foreground
+        $statusDetail.Text = ConvertTo-ImgPasteTrayDisplayText -Text $CurrentState.Detail -MaximumLength 260
+        if ([string]::IsNullOrWhiteSpace($statusDetail.Text)) { $statusDetail.Text = Get-ImgPasteTrayGuidance -State $CurrentState }
+        $statusDetail.ForeColor = Get-ImgPasteTrayColor $style.Foreground
+
+        $guardianCount = (@($CurrentState.Guardians)).Count
+        $watcherCount = (@($CurrentState.Watchers)).Count
+        $serviceRunning = ($guardianCount -gt 0 -or $watcherCount -gt 0)
+        $serviceCard.Value.Text = if ($CurrentState.Level -eq "Healthy") { "Running" } elseif ($serviceRunning) { "Needs attention" } else { "Stopped" }
+        $serviceCard.Value.ForeColor = Get-ImgPasteTrayColor $style.Foreground
+        $serviceCard.Detail.Text = "$guardianCount guardian; $watcherCount watcher"
+        $heartbeatCard.Value.Text = Get-ImgPasteTrayRelativeTimeText -AgeSeconds $CurrentState.HeartbeatAgeSeconds
+        $heartbeatCard.Detail.Text = if ($CurrentState.Heartbeat) { "Watcher: $($CurrentState.Heartbeat.Status)" } else { "No valid health record" }
+        $hasLatestPath = (-not [string]::IsNullOrWhiteSpace($CurrentState.LatestPath) -and (Test-ImgPasteRemotePath $CurrentState.LatestPath))
+        $latestCard.Value.Text = if ($hasLatestPath) { "Ready to copy" } else { "No upload yet" }
+        $latestCard.Detail.Text = if ($hasLatestPath) { "Latest path is available locally" } else { "Upload an image to create one" }
+
+        $uploadButton.Enabled = $CurrentState.Level -ne "Error"
+        $copyButton.Enabled = $hasLatestPath
+        $copyButton.Text = if ($hasLatestPath) { "Copy latest path" } else { "No upload path yet" }
+        $serviceButton.Text = if (-not $serviceRunning) { "Start automatic uploads" } elseif ($CurrentState.Level -in @("Warning", "Unknown")) { "Repair service" } else { "Restart service" }
+        $serviceButton.Enabled = ($CurrentState.Level -ne "Error" -and $CurrentState.GuardianProbeAvailable -and ((-not $serviceRunning) -or $CurrentState.WatcherProbeAvailable))
+        $actionFeedback.Text = Get-ImgPasteTrayGuidance -State $CurrentState
+        $form.Text = "imgpaste status - $($style.Badge)"
+    }.GetNewClosure()
+
+    $refreshButton.Add_Click({
+        try {
+            $freshState = Get-ImgPasteTrayState
+            & $refreshDashboard $freshState
+        }
+        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
     })
-    $form.Controls.Add($restart)
-
-    $log = New-Object System.Windows.Forms.Button
-    $log.Text = "Open log"
-    $log.Location = New-Object System.Drawing.Point(158, 252)
-    $log.Size = New-Object System.Drawing.Size(100, 30)
-    $log.Add_Click({ try { Open-ImgPasteTrayLog } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-    $form.Controls.Add($log)
+    $uploadButton.Add_Click({
+        try {
+            Start-ImgPasteTrayUpload
+            $actionFeedback.Text = "Upload requested. Refresh status after the clipboard image is processed."
+        }
+        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+    })
+    $copyButton.Add_Click({
+        try {
+            $currentState = Get-ImgPasteTrayState
+            Copy-ImgPasteTrayLatestPath -State $currentState
+            $actionFeedback.Text = "Latest upload path copied to the clipboard."
+        }
+        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+    })
+    $serviceButton.Add_Click({
+        try {
+            $currentState = Get-ImgPasteTrayState
+            $currentlyRunning = ((@($currentState.Guardians)).Count -gt 0 -or (@($currentState.Watchers)).Count -gt 0)
+            if ($currentlyRunning) { Restart-ImgPasteTrayService } else { [void](Start-ImgPasteTrayGuardian) }
+            Start-Sleep -Milliseconds 350
+            & $refreshDashboard (Get-ImgPasteTrayState)
+        }
+        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+    })
+    $settingsButton.Add_Click({ try { Open-ImgPasteTrayConfig } catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) } })
+    $logButton.Add_Click({ try { Open-ImgPasteTrayLog } catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) } })
+    $dataButton.Add_Click({ try { Open-ImgPasteTrayDataFolder } catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) } })
 
     $close = New-Object System.Windows.Forms.Button
+    $close.Name = "imgpasteTrayCloseButton"
     $close.Text = "Close"
     $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $close.Location = New-Object System.Drawing.Point(466, 252)
-    $close.Size = New-Object System.Drawing.Size(100, 30)
+    $close.Size = New-Object System.Drawing.Size(92, 30)
+    $close.Visible = $false
     $form.Controls.Add($close)
     $form.CancelButton = $close
-    [void]$form.ShowDialog()
-    $form.Dispose()
+    $form.Add_KeyDown({ if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $form.Close() } })
+
+        & $refreshDashboard $State
+        [void]$form.ShowDialog()
+    }
+    finally {
+        if ($tooltip) { $tooltip.Dispose() }
+        if ($form) { $form.Dispose() }
+        if ($logoImage) { $logoImage.Dispose() }
+        if ($windowIcon -and $windowIcon.OwnsIcon -and $windowIcon.Icon) { $windowIcon.Icon.Dispose() }
+    }
 }
 
 function Start-ImgPasteTrayApplication {
@@ -346,14 +897,16 @@ function Start-ImgPasteTrayApplication {
     if (-not $mutex.WaitOne(0, $false)) { return }
     $notify = $null
     $timer = $null
+    $trayIconSelection = $null
     try {
         $script:ImgPasteTrayState = Get-ImgPasteTrayState
         $script:ImgPasteTrayLastLevel = ""
         $menu = New-Object System.Windows.Forms.ContextMenuStrip
         $statusItem = $menu.Items.Add("Loading status...")
         $statusItem.Enabled = $false
+        $showStatusItem = $menu.Items.Add("View status...")
         [void]$menu.Items.Add("-")
-        $uploadItem = $menu.Items.Add("Upload clipboard image now")
+        $uploadItem = $menu.Items.Add("Upload current clipboard image")
         $copyItem = $menu.Items.Add("Copy latest upload path")
         [void]$menu.Items.Add("-")
         $startItem = $menu.Items.Add("Start service")
@@ -364,10 +917,14 @@ function Start-ImgPasteTrayApplication {
         $configItem = $menu.Items.Add("Open configuration")
         $dataItem = $menu.Items.Add("Open data folder")
         [void]$menu.Items.Add("-")
-        $exitItem = $menu.Items.Add("Exit tray")
+        $exitItem = $menu.Items.Add("Exit tray (service stays running)")
 
         $notify = New-Object System.Windows.Forms.NotifyIcon
-        $notify.Icon = [System.Drawing.SystemIcons]::Application
+        $trayIconSelection = Get-ImgPasteTrayIcon
+        $notify.Icon = $trayIconSelection.Icon
+        if ($trayIconSelection.IsFallback) {
+            Write-ImgPasteLog "tray icon asset was unavailable or invalid; using the Windows application icon"
+        }
         $notify.ContextMenuStrip = $menu
         $notify.Visible = $true
         $context = New-Object System.Windows.Forms.ApplicationContext
@@ -390,6 +947,7 @@ function Start-ImgPasteTrayApplication {
             $script:ImgPasteTrayLastLevel = $state.Level
         }
 
+        $showStatusItem.Add_Click({ & $refreshUi; Show-ImgPasteTrayStatusWindow -State $script:ImgPasteTrayState })
         $uploadItem.Add_Click({ try { Start-ImgPasteTrayUpload; $notify.ShowBalloonTip(2000, "imgpaste", "One-shot upload requested.", [System.Windows.Forms.ToolTipIcon]::Info) } catch { Show-ImgPasteTrayError $_.Exception.Message } })
         $copyItem.Add_Click({ try { Copy-ImgPasteTrayLatestPath -State $script:ImgPasteTrayState; $notify.ShowBalloonTip(1500, "imgpaste", "Latest upload path copied.", [System.Windows.Forms.ToolTipIcon]::Info) } catch { Show-ImgPasteTrayError $_.Exception.Message } })
         $startItem.Add_Click({ try { [void](Start-ImgPasteTrayGuardian); & $refreshUi } catch { Show-ImgPasteTrayError $_.Exception.Message } })
@@ -411,6 +969,7 @@ function Start-ImgPasteTrayApplication {
     finally {
         if ($timer) { $timer.Stop(); $timer.Dispose() }
         if ($notify) { $notify.Visible = $false; $notify.Dispose() }
+        if ($trayIconSelection -and $trayIconSelection.OwnsIcon -and $trayIconSelection.Icon) { $trayIconSelection.Icon.Dispose() }
         $mutex.ReleaseMutex() | Out-Null
         $mutex.Dispose()
     }

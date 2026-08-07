@@ -102,7 +102,7 @@ $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         (Test-ImgPasteProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath $guardianScript)
     }
 if (-not $existing) {
-    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", $guardianScript) -WindowStyle Hidden
+    Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", ('"{0}"' -f $guardianScript)) -WindowStyle Hidden
     Write-Host "Started imgpaste watchdog."
 }
 else {
