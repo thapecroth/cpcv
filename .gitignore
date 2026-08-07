@@ -1,0 +1,32 @@
+# Generated local state and image copies
+cache/
+*.log
+*.log.*
+last-hash.txt
+last-remote-path.txt
+watch.heartbeat
+status-check*.txt
+diag-*.txt
+
+# Editor/OS files
+*.tmp
+Thumbs.db
+desktop.ini
+
+# Per-user connection settings. Keep custom IMGPASTE_CONFIG files outside the
+# checkout when possible. If one must live here, use one of these ignored names.
+# Never commit hosts, usernames, local paths, passwords, keys, tokens, or proxy URLs.
+imgpaste.config.psd1
+config.psd1
+*.private.psd1
+*.local.psd1
+
+# Keep native macOS JSON configuration local as well.
+imgpaste.config.json
+config.json
+*.private.json
+*.local.json
+
+# Local macOS build output. The installer compiles a per-user executable here;
+# source and checked-in LaunchAgent templates remain in macos/.
+macos/build/

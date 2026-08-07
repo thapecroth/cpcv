@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Managed by imgpaste install-macos.sh. Do not put a shell command here. -->
+  <key>Label</key>
+  <string>io.imgpaste.guardian</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__IMGPASTE_EXECUTABLE__</string>
+    <string>guardian</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>IMGPASTE_CONFIG</key>
+    <string>__IMGPASTE_CONFIG__</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>__IMGPASTE_PROJECT_ROOT__</string>
+  <key>StandardOutPath</key>
+  <string>__IMGPASTE_LAUNCHD_LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__IMGPASTE_LAUNCHD_LOG__</string>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>15</integer>
+</dict>
+</plist>

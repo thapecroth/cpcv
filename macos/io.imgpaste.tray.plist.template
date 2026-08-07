@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Managed by imgpaste install-tray.sh. Do not put a shell command here. -->
+  <key>Label</key>
+  <string>io.imgpaste.tray</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__IMGPASTE_TRAY_LAUNCHER__</string>
+  </array>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>

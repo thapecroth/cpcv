@@ -1,0 +1,14 @@
+{
+  "hostAlias": "imgpaste-host",
+  "remoteDir": "clipboard-images",
+  "remoteHome": "",
+  "pollIntervalSeconds": 2,
+  "commandTimeoutSeconds": 35,
+  "maxCommandOutputBytes": 65536,
+  "watchdogCheckSeconds": 15,
+  "watchdogStaleSeconds": 120,
+  "maxImageBytes": 52428800,
+  "maxCacheBytes": 268435456,
+  "maxCacheFiles": 128,
+  "maxLogBytes": 1048576
+}
