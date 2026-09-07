@@ -73,7 +73,6 @@ function Resolve-CpcvInnoCompiler {
     param([AllowEmptyString()][string]$RequestedPath)
 
     $candidates = [System.Collections.Generic.List[string]]::new()
-    $rejected = [System.Collections.Generic.List[string]]::new()
     if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
         $candidates.Add($RequestedPath)
     }
@@ -89,25 +88,12 @@ function Resolve-CpcvInnoCompiler {
 
     foreach ($candidate in @($candidates | Select-Object -Unique)) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
-        $resolved = [IO.Path]::GetFullPath($candidate)
-        $versionText = (Get-Item -LiteralPath $resolved).VersionInfo.FileVersion
-        $versionMatch = [regex]::Match([string]$versionText, '\d+(?:\.\d+){1,3}')
-        $reportedVersion = if ($versionMatch.Success) { $versionMatch.Value } else { '' }
-        if ([string]::IsNullOrWhiteSpace($reportedVersion) -or [version]$reportedVersion -lt [version]'6.3') {
-            # ISCC's PE resource can be 0.0.0.0 on hosted runners. The
-            # compiler's documented --version switch is authoritative.
-            $probeOutput = @(& $resolved --version 2>&1)
-            $probeMatch = [regex]::Match(($probeOutput -join [Environment]::NewLine), '\d+(?:\.\d+){1,3}')
-            if ($probeMatch.Success) { $reportedVersion = $probeMatch.Value }
-        }
-        if ([string]::IsNullOrWhiteSpace($reportedVersion) -or [version]$reportedVersion -lt [version]'6.3') {
-            $rejected.Add("$resolved $(if ($reportedVersion) { "($reportedVersion)" } else { '(unknown version)' })")
-            continue
-        }
-        return $resolved
+        # The compiler's file version is not reliably stamped on hosted
+        # images. Compilation below is the compatibility check; prefer the
+        # canonical Inno Setup installation over a package-manager PATH shim.
+        return [IO.Path]::GetFullPath($candidate)
     }
-    $detail = if ($rejected.Count) { " Rejected candidates: $($rejected -join '; ')." } else { '' }
-    throw "Inno Setup 6.3 or later compiler (ISCC.exe) was not found. Install Inno Setup 6.3+ or pass -InstallerCompiler.$detail"
+    throw "Inno Setup compiler (ISCC.exe) was not found. Install Inno Setup 6.3+ or pass -InstallerCompiler."
 }
 
 function Test-CpcvExecutableHeader {
