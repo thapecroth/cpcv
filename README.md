@@ -1,6 +1,6 @@
 # imgpaste
 
-> Upload clipboard images to an SSH host, then put the remote path back on the
+> Upload clipboard images to an SSH host while preserving the local image
 > clipboard.
 
 ![Illustration of the imgpaste workflow](assets/imgpaste-workflow.png)
@@ -23,7 +23,8 @@ optional; none is required for the core workflow.
 3. imgpaste uploads it through your existing SSH configuration.
 4. The remote host receives a timestamped PNG and updates
    `~/clipboard-images/latest.png` (or your configured directory).
-5. Your clipboard becomes the remote path, ready to paste.
+5. Your original image remains on the local clipboard; tmux can insert the
+   remote `latest.png` path into the target pane when needed.
 
 imgpaste sends only clipboard images. It does not capture the screen, install a
 screenshot application, or require a cloud service. See
@@ -92,7 +93,9 @@ ssh image-box true
 
 Set `HostAlias` in the config to `image-box`, or another usable SSH target.
 The default stable remote path is `~/clipboard-images/latest.png`. Screenshot
-or copy an image, wait roughly two seconds, then paste the remote path.
+or copy an image, wait roughly two seconds, then use the optional tmux paste
+binding on the SSH host. Automatic uploads never replace the local image with
+text; **Copy latest path** remains an explicit manual fallback.
 
 #### Build a portable Windows archive
 
@@ -239,8 +242,10 @@ before committing.
   sensitive local data and set retention/backup policy accordingly.
 
 The tray view is an optional status/control surface; it is not a second
-uploader. It shows bounded, redacted health information and never launches a
-duplicate uploader. See
+uploader. Its compact menu shows current health, last-upload recency, copy-path,
+pause/resume, Settings, and **Check & Repair**. Routine actions are silent;
+warnings stay visible in the menu-bar icon and status row. Advanced restart,
+activity, and status details live under **Troubleshooting**. See
 [docs/platforms.md](docs/platforms.md#tray-and-status-controls).
 
 ### Windows diagnosis
@@ -275,35 +280,59 @@ process names directly:
 
 ```bash
 bash macos/imgpaste-macos-ctl.sh status
+bash macos/imgpaste-macos-ctl.sh doctor
 bash macos/imgpaste-macos-ctl.sh logs
 bash macos/imgpaste-macos-ctl.sh restart
 ```
 
-The menu-bar companion reads the same bounded JSON status record and delegates
-start/stop/restart/upload actions to that controller. It does not show raw SSH
-output or store SSH credentials.
+`doctor` checks the local LaunchAgent, SSH connection, remote upload directory,
+and an explicitly installed Codex X11 bridge. It can restart owned components,
+repair a managed bridge, and create the configured remote directory. A bridge
+removed with its uninstaller stays absent. Invalid settings, authentication,
+package, permission, and ownership problems are reported without broad system
+changes.
+The menu-bar companion runs this same action through **Check & Repair** and
+keeps the latest result in its status display. It does not show raw SSH output
+or store SSH credentials.
 
 ## Optional remote helpers and legacy Windows artifacts
 
 The core uploader on either platform needs only SSH. The optional Windows
-remote-helper installation below writes three *prefixed* programs to
-`~/.local/bin` on the configured remote host and an `IMGPASTE_DIR` file at
-`~/.config/imgpaste/env`:
+remote-helper installation writes named helpers plus an opt-in tmux plugin to
+the configured remote host:
 
 ```powershell
 .\install-autostart.ps1 -DeployRemoteHelpers
 ```
 
-- `imgpaste-latest` prints the latest image path, or pastes it into tmux.
+- `imgpaste-latest` prints the latest image path, or inserts it into its
+  originating tmux pane.
 - `imgpaste-xclip` and `imgpaste-wl-paste` are named wrappers for tools that
   explicitly opt in to imgpaste image handling.
+- The installer prints one `run-shell` line to add to a user-owned tmux config.
 
-The installer does not edit shell rc files, `PATH`, tmux, Claude/agent settings,
-or the global `xclip`/`wl-paste` commands. Do not symlink these helpers over the
-real commands unless you intentionally own and test that integration. Add
-`~/.local/bin` to remote `PATH` yourself if you want to invoke the prefixed
-helpers directly. `tmux-imgpaste.conf`, `CLAUDE-snippet.md`, and `remote-e2e.sh`
-are optional manual integration/diagnostic aids.
+The installer does not edit shell rc files, `PATH`, tmux startup files,
+Claude/agent settings, or global `xclip`/`wl-paste` commands. Do not symlink
+helpers over real commands unless you intentionally own and test that
+integration. Add `~/.local/bin` to remote `PATH` yourself if you invoke the
+prefixed helpers directly.
+
+### Tmux path paste
+
+The tmux plugin is the path-paste workflow for an SSH terminal. It uses a
+pane-specific transient tmux buffer, pastes only `latest.png` into that pane,
+and never writes the host clipboard. Add the `run-shell` line printed by either
+installer, then reload tmux. The default capture key is `Ctrl-V`; map your
+terminal's `Cmd-V` shortcut to send `Ctrl-V` while tmux is active. Terminals
+normally consume raw `Cmd-V`, so tmux cannot capture it without that terminal
+mapping. If `Ctrl-V` is already bound, imgpaste leaves that binding alone; set
+`@imgpaste-paste-key` to an unused tmux key before sourcing the plugin.
+
+On macOS, explicitly deploy the plugin to the configured SSH host with:
+
+```bash
+bash macos/deploy-remote-tmux-imgpaste-plugin.sh --host image-box
+```
 
 For Windows compatibility, `setup-imgpaste.ps1`, `enable-auto-paste.ps1`, and
 `setup-imgpaste.cmd` delegate to the current installer with a warning.
@@ -311,6 +340,38 @@ For Windows compatibility, `setup-imgpaste.ps1`, `enable-auto-paste.ps1`, and
 `xclip` or `wl-paste`. `deploy-remote.sh` is an advanced manual helper installer
 for files already staged on a remote host. New installations should use
 `install-autostart.ps1`.
+
+### Native Codex image paste on a Linux SSH host
+
+Native Codex on a headless Linux SSH host reads its own X11 or Wayland
+clipboard; it does not call `xclip`, so tmux path insertion and direct image
+paste are separate opt-in workflows.
+
+For an explicit Linux/Codex integration, macOS can deploy a private per-user
+Xvfb display and a bridge that republishes `latest.png` as `image/png`:
+
+```bash
+bash macos/deploy-remote-codex-x11-bridge.sh --host image-box
+```
+
+The deployment uses `:98` by default, a private Xauthority cookie, two owned
+user systemd services, and no global `xclip`/`wl-paste` replacement. It adds a
+managed `~/.zshrc` wrapper that applies the bridge environment only to **new**
+Codex sessions. If `codex` is already a zsh alias, use `--no-zsh-env` and add a
+compatible wrapper yourself. Existing Codex processes must be exited and
+started again.
+Verify the remote clipboard with:
+
+```bash
+ssh image-box '~/.local/lib/imgpaste/imgpaste-codex-x11-test'
+```
+
+Do not point this integration at another application's X server; choose a free
+display number if `:98` is occupied. Remove only this optional bridge with:
+
+```bash
+ssh image-box '~/.local/lib/imgpaste/imgpaste-codex-x11-uninstall'
+```
 
 ## Update and uninstall
 
@@ -360,10 +421,12 @@ shortcut but leave this checkout's already-running tray process alive.
 ### macOS
 
 After an update, rerun the native installer to rebuild the local executable,
-then restart only the scoped guardian:
+then restart only the scoped guardian. Rerun the tray installer too when using
+the optional menu-bar app:
 
 ```bash
 bash macos/install-macos.sh
+bash macos/install-tray.sh
 bash macos/imgpaste-macos-ctl.sh restart
 ```
 
@@ -390,6 +453,7 @@ powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-tray.
 
 ```bash
 bash macos/test-macos.sh
+bash tests/test-tmux-imgpaste.sh
 ```
 
 `tests/test-guardian-recovery.ps1` intentionally restarts the local watcher;

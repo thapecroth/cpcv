@@ -108,6 +108,25 @@ rm -f "`$HOME/.local/bin/imgpaste-latest" "`$HOME/.local/bin/imgpaste-xclip" "`$
 if [ -f "`$HOME/.config/imgpaste/env" ] && grep -q '^export IMGPASTE_DIR=' "`$HOME/.config/imgpaste/env"; then
   rm -f "`$HOME/.config/imgpaste/env"
 fi
+marker='# Managed by imgpaste tmux plugin'
+plugin="`$HOME/.local/lib/imgpaste/tmux"
+config="`$HOME/.config/imgpaste/tmux-paste.conf"
+config_dir="`$HOME/.config/imgpaste"
+owned_tmux_file() {
+  [ -f "`$1" ] && ! [ -L "`$1" ] && grep -Fqx "`$marker" "`$1"
+}
+if ! [ -L "`$plugin" ]; then
+  if owned_tmux_file "`$plugin/imgpaste.tmux"; then
+    rm -f "`$plugin/imgpaste.tmux"
+  fi
+  if owned_tmux_file "`$plugin/tmux/scripts/imgpaste-tmux-paste.sh"; then
+    rm -f "`$plugin/tmux/scripts/imgpaste-tmux-paste.sh"
+  fi
+  rmdir "`$plugin/tmux/scripts" "`$plugin/tmux" "`$plugin" 2>/dev/null || true
+fi
+if ! [ -L "`$config_dir" ] && owned_tmux_file "`$config"; then
+  rm -f "`$config"
+fi
 "@
     if ($RemoveRemoteImages) { $remote += "`nrm -rf `"`$HOME/$remoteDir`"`n" }
     $target = "$($cfg.HostAlias): optional imgpaste remote helpers"

@@ -99,4 +99,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run network-free native checks
         shell: bash
-        run: bash macos/test-macos.sh
+        run: |
+          bash macos/test-macos.sh
+          bash tests/test-tmux-imgpaste.sh

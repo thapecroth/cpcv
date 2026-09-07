@@ -116,7 +116,14 @@ function Install-ImgPasteRemoteHelpers {
     $stage = ($stageResult.StdOut -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
     if ($stage -notmatch '^/tmp/[A-Za-z0-9._-]+$') { throw "Remote staging path was unexpected; refusing to continue." }
 
-    $files = @("imgpaste-latest.sh", "xclip-shim.sh", "wl-paste-shim.sh") | ForEach-Object { Join-Path $share $_ }
+    $files = @(
+        "imgpaste-latest.sh",
+        "xclip-shim.sh",
+        "wl-paste-shim.sh",
+        "imgpaste.tmux",
+        "tmux\scripts\imgpaste-tmux-paste.sh",
+        "remote\install-tmux-imgpaste-plugin.sh"
+    ) | ForEach-Object { Join-Path $share $_ }
     foreach ($file in $files) { if (-not (Test-Path $file)) { throw "Missing helper: $file" } }
     $copy = Invoke-ImgPasteProcess -FilePath "scp" -Arguments ($sshOpts + $files + @("$($cfg.HostAlias):$stage/")) -Label "scp remote helpers"
     if (-not $copy.Ok) { throw "Could not copy remote helpers: $(Protect-ImgPasteLogDetail $copy.Detail)" }
@@ -130,6 +137,7 @@ install -m 755 "`$stage/imgpaste-latest.sh" "`$HOME/.local/bin/imgpaste-latest"
 install -m 755 "`$stage/xclip-shim.sh" "`$HOME/.local/bin/imgpaste-xclip"
 install -m 755 "`$stage/wl-paste-shim.sh" "`$HOME/.local/bin/imgpaste-wl-paste"
 printf 'export IMGPASTE_DIR="%s"\n' "`$HOME/$remoteDir" > "`$HOME/.config/imgpaste/env"
+/usr/bin/env bash "`$stage/install-tmux-imgpaste-plugin.sh" --remote-dir "$remoteDir"
 rm -rf "`$stage"
 echo "Installed optional helpers in `$HOME/.local/bin"
 "@
@@ -139,11 +147,11 @@ echo "Installed optional helpers in `$HOME/.local/bin"
 }
 
 Write-Host "Local watcher installed for SSH target '$($cfg.HostAlias)'."
-Write-Host "Screenshot/copy an image, wait about $($cfg.PollIntervalSeconds) seconds, then paste the reported remote path."
+Write-Host "Screenshot/copy an image, wait about $($cfg.PollIntervalSeconds) seconds, then use the tmux imgpaste paste binding on the SSH host."
 Write-Host "Config: $(Get-ImgPasteConfigPath)"
 if ($DeployRemoteHelpers) {
     Install-ImgPasteRemoteHelpers
-    Write-Host "Optional remote helpers installed. Add ~/.local/bin to PATH on the remote host if it is not already present."
+    Write-Host "Optional remote helpers and tmux plugin were installed. Add ~/.local/bin to PATH and the printed run-shell line to tmux on the remote host."
 }
 else {
     Write-Host "Remote helpers were not changed. Re-run with -DeployRemoteHelpers to opt in."

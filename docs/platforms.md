@@ -47,15 +47,19 @@ selected private configuration path, writes a managed LaunchAgent, and starts
 the guardian. `macos/install-tray.sh` builds and installs the optional menu
 bar companion after the uploader is present. Both reject `sudo`, a missing GUI
 domain, a symlinked target, and an unrelated existing LaunchAgent label.
+The guardian and optional tray have a fixed PATH containing standard system
+locations plus the Apple Silicon and Intel Homebrew locations, so an SSH
+`ProxyCommand` can use tools such as `cloudflared` when imgpaste runs in the
+background.
 
 Use `macos/imgpaste-macos-ctl.sh` for fixed local actions only:
 
 ```text
-status | start | stop | restart | logs | upload | config
+status | start | stop | restart | logs | upload | config | settings-read | settings-save | doctor
 ```
 
-It never accepts a shell fragment or host argument. `status` emits bounded JSON
-with operational state and no raw subprocess output. `uninstall-macos.sh` and
+It never accepts a shell fragment or builds a shell command from settings.
+`status` emits bounded JSON with operational state and no raw subprocess output. `uninstall-macos.sh` and
 `uninstall-tray.sh` remove only managed labels and preserve private data by
 default.
 
@@ -68,14 +72,70 @@ The tray is a local status/control client, never a second uploader.
 - macOS uses a single managed `io.imgpaste.tray` LaunchAgent and calls the
   project-owned control script with fixed action names.
 
-Both interfaces show bounded, redacted state and can request a one-shot upload,
-copy the last validated remote path, start/stop/restart the local service, and
-open local diagnostics. On Windows, **View status** opens a dashboard with a
+Both interfaces show bounded, redacted state, copy the last validated remote
+path, control the local service, and open local diagnostics. On Windows,
+**View status** opens a dashboard with a
 clear health banner, automatic-upload/heartbeat/latest-image cards, an
 explicit refresh control, and context-sensitive recovery guidance. It keeps
 remote paths out of casual display; use **Copy latest path** when you need it.
 Neither interface accepts arbitrary commands, exposes raw SSH output in a
 tooltip, or holds SSH credentials.
+
+On macOS, the everyday menu contains a disabled status row, **Copy Last Image
+Path**, one contextual pause/resume action, **Check & Repair**, and **Settings**.
+Restart, recent activity, and internal status details are grouped under
+**Troubleshooting**. The icon is a checkmark while healthy, a spinner during an
+upload or repair, and a warning triangle when either the watcher or latest
+Doctor report needs attention. Successful routine actions do not interrupt the
+user with dialogs.
+
+**Settings** is a form for the SSH target, remote image folder, optional remote
+home, and upload interval. It validates inputs before saving and restarts the
+owned uploader so a changed target takes effect. Editing raw JSON remains an
+advanced fallback only.
+
+Doctor validates configuration, the owned local LaunchAgent, SSH reachability,
+remote-directory writability, and the optional marked Codex bridge. It repairs
+only existing project-owned services and files; an absent optional bridge stays
+absent. It refuses unrelated same-name services and reports problems without
+making broad system changes.
+
+## Optional native Codex image paste on Linux
+
+Automatic uploads preserve the source image on the macOS clipboard. Native
+Codex running inside a headless Linux SSH/tmux session is different: it
+uses the process's X11 or Wayland clipboard and does not invoke the optional
+`xclip` helper. Direct image paste therefore needs a remote display and an
+image selection owner.
+
+`macos/deploy-remote-codex-x11-bridge.sh` is an explicit opt-in deployment for
+a configured Linux SSH host. It stages `remote/install-codex-x11-bridge.sh`,
+which creates a per-user `:98` Xvfb display, private Xauthority cookie, and
+two owned user systemd services. The bridge follows the configured remote
+directory's `latest.png` symlink and publishes it as the X11 `image/png`
+clipboard selection. It never modifies the system X server or shadows global
+clipboard commands.
+
+The deployment's default zsh integration wraps only `codex`, leaving SSH X
+forwarding unchanged for other programs. Newly launched Codex processes use
+the private display; existing processes must be restarted. The installer warns
+when user-systemd lingering is disabled because services can stop after logout.
+Run the remote test script after an upload to compare the X11 clipboard bytes
+with `latest.png` before testing the Codex TUI manually.
+
+The installed `imgpaste-codex-x11-uninstall` command disables and removes only
+the two marked user units, bridge files, Xauthority data, and managed zsh
+block. It preserves uploaded images and the core imgpaste configuration.
+
+## Optional tmux path paste
+
+`imgpaste.tmux` inserts the configured remote `latest.png` path into the pane
+that triggered it, using a transient tmux buffer. It does not change an OS
+clipboard. Source the plugin's printed `run-shell` line in a user-owned tmux
+config. Its default capture key is `Ctrl-V`; map `Cmd-V` in your terminal to
+send that key if you want the familiar shortcut. If that key is already bound,
+imgpaste leaves it unchanged; configure `@imgpaste-paste-key` to use an unused
+tmux key before sourcing the plugin.
 
 ## Reliability and security invariants
 

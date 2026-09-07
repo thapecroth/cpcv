@@ -18,15 +18,15 @@ if (-not $mutex.WaitOne(0, $false)) {
 }
 
 $failureCount = 0
-Write-ImgPasteLog "watcher started (host=$($script:ImgPasteConfig.HostAlias), interval=${IntervalSeconds}s, mode=path-text, pid=$PID)"
+Write-ImgPasteLog "watcher started (host=$($script:ImgPasteConfig.HostAlias), interval=${IntervalSeconds}s, mode=image-preserved, pid=$PID)"
 try {
     while ($true) {
         try {
             Update-ImgPasteHeartbeat -Status "checking"
-            $result = Publish-ClipboardImage -CopyPath
+            $result = Publish-ClipboardImage
             if ($result.Ok) {
                 $failureCount = 0
-                if ($result.Reason -eq "uploaded") { Write-ImgPasteLog "auto-synced path-text $($result.RemotePath)" }
+                if ($result.Reason -eq "uploaded") { Write-ImgPasteLog "auto-synced image $($result.RemotePath)" }
             }
             elseif ($result.Reason -ne "no-image" -and $result.Reason -ne "upload-in-progress" -and $result.Reason -ne "clipboard-changed") {
                 $failureCount++

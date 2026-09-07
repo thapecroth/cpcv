@@ -1,4 +1,4 @@
-# One-shot: upload clipboard image, put remote path on clipboard, toast result.
+# One-shot: upload clipboard image without replacing it with a remote path.
 param([switch]$Silent)
 
 $ErrorActionPreference = "Stop"
@@ -20,12 +20,12 @@ function Show-Toast {
     catch { }
 }
 
-$result = Publish-ClipboardImage -CopyPath -Force
+$result = Publish-ClipboardImage -Force
 if (-not $result.Ok) {
     $msg = if ($result.Reason -eq "no-image") { "No image on clipboard. Screenshot/copy an image first." } else { "imgpaste failed: $($result.Reason)" }
     if ($result.Reason -eq "configuration-invalid" -and $result.Detail) { $msg = "imgpaste configuration error: $($result.Detail)" }
     if (-not $Silent) { Show-Toast "imgpaste" $msg; Write-Host $msg }
     exit 1
 }
-if (-not $Silent) { Show-Toast "imgpaste" $result.RemotePath; Write-Host $result.RemotePath }
+if (-not $Silent) { Show-Toast "imgpaste" "Image uploaded; clipboard image preserved."; Write-Host $result.RemotePath }
 exit 0

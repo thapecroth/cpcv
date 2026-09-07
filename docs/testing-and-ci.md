@@ -19,6 +19,7 @@ is private. The native macOS test entry point is:
 
 ```bash
 bash macos/test-macos.sh
+bash tests/test-tmux-imgpaste.sh
 ```
 
 It requires macOS 11 or newer and Xcode Command Line Tools. It compiles

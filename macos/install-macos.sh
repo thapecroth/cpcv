@@ -226,6 +226,7 @@ write_plist "$template" "$plist_tmp" "$executable" "$config_file" "$project_root
 if (( existing_managed_plist )) && job_loaded; then
   is_managed_plist "$plist" || die "LaunchAgent ownership changed during installation; refusing to unload $label."
   /bin/launchctl bootout "$domain/$label"
+  /bin/sleep 1
 fi
 /bin/mv -f -- "$plist_tmp" "$plist"
 trap - EXIT

@@ -10,7 +10,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-private let imgPasteVersion = "0.2.0"
+private let imgPasteVersion = "0.3.0"
 private let maxStatusBytes = 65_536
 private let sshOptions = [
     "-o", "BatchMode=yes",
@@ -56,6 +56,13 @@ struct RawConfig: Decodable {
     let maxImageBytes: Int?
 }
 
+struct SettingsForm: Codable {
+    let hostAlias: String
+    let remoteDir: String
+    let remoteHome: String
+    let pollIntervalSeconds: Int
+}
+
 struct Config {
     let hostAlias: String
     let remoteDir: String
@@ -79,6 +86,9 @@ struct Config {
     var guardianLockFile: String { URL(fileURLWithPath: dataRoot).appendingPathComponent("guardian.lock").path }
     var watcherLockFile: String { URL(fileURLWithPath: dataRoot).appendingPathComponent("watcher.lock").path }
     var uploadLockFile: String { URL(fileURLWithPath: dataRoot).appendingPathComponent("upload.lock").path }
+    var doctorLockFile: String { URL(fileURLWithPath: dataRoot).appendingPathComponent("doctor.lock").path }
+    var doctorReportFile: String { URL(fileURLWithPath: dataRoot).appendingPathComponent("doctor-report.json").path }
+    var bridgeReceiptFile: String { URL(fileURLWithPath: dataRoot).appendingPathComponent("codex-x11-bridge.json").path }
 }
 
 struct Status: Codable {
@@ -94,6 +104,32 @@ struct Status: Codable {
     let latestPath: String?
     let lastRemotePath: String?
     let logFile: String?
+    let doctorOverall: String?
+    let doctorSummary: String?
+    let doctorUpdatedAt: String?
+}
+
+struct DoctorCheck: Codable {
+    let id: String
+    let status: String
+    let message: String
+}
+
+struct DoctorReport: Codable {
+    let version: String
+    let overall: String
+    let updatedAt: String
+    let summary: String
+    let checks: [DoctorCheck]
+    let repairs: [String]
+}
+
+struct BridgeReceipt: Codable {
+    let version: String
+    let hostAlias: String
+    let remoteDir: String
+    let display: String
+    let enableZsh: Bool
 }
 
 struct ProcessResult {
@@ -165,19 +201,7 @@ private func normalizedDataRoot(_ value: String?) throws -> String {
     return URL(fileURLWithPath: expanded).standardizedFileURL.path
 }
 
-private func loadConfig() throws -> Config {
-    let path = configPath()
-    let url = URL(fileURLWithPath: path)
-    guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-          let size = attributes[.size] as? NSNumber,
-          size.intValue >= 0, size.intValue <= maxStatusBytes else {
-        throw ImgPasteError.configuration("configuration-too-large")
-    }
-    let data: Data
-    do { data = try Data(contentsOf: url, options: [.mappedIfSafe]) }
-    catch { throw ImgPasteError.configuration("configuration-unavailable") }
-    guard data.count <= maxStatusBytes else { throw ImgPasteError.configuration("configuration-too-large") }
-
+private func configFromData(_ data: Data) throws -> Config {
     let raw: RawConfig
     do { raw = try JSONDecoder().decode(RawConfig.self, from: data) }
     catch { throw ImgPasteError.configuration("configuration-invalid") }
@@ -218,6 +242,143 @@ private func loadConfig() throws -> Config {
         maxLogBytes: maxLog, maxCacheFiles: maxFiles, maxCacheBytes: maxCache,
         maxImageBytes: maxImage
     )
+}
+
+private func loadConfig() throws -> Config {
+    let path = configPath()
+    let url = URL(fileURLWithPath: path)
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+          let size = attributes[.size] as? NSNumber,
+          size.intValue >= 0, size.intValue <= maxStatusBytes else {
+        throw ImgPasteError.configuration("configuration-too-large")
+    }
+    let data: Data
+    do { data = try Data(contentsOf: url, options: [.mappedIfSafe]) }
+    catch { throw ImgPasteError.configuration("configuration-unavailable") }
+    guard data.count <= maxStatusBytes else { throw ImgPasteError.configuration("configuration-too-large") }
+    return try configFromData(data)
+}
+
+private func settingsConfigURL() throws -> URL {
+    let path = configPath()
+    guard !path.isEmpty else { throw ImgPasteError.configuration("configuration-unavailable") }
+    let url = URL(fileURLWithPath: path).standardizedFileURL
+    guard isRegularNonSymlink(url.path) else {
+        throw ImgPasteError.configuration("configuration-unavailable")
+    }
+    return url.resolvingSymlinksInPath().standardizedFileURL
+}
+
+private func settingsJSONObject() throws -> (URL, [String: Any]) {
+    let url = try settingsConfigURL()
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          let size = attributes[.size] as? NSNumber,
+          size.intValue >= 0, size.intValue <= maxStatusBytes else {
+        throw ImgPasteError.configuration("configuration-too-large")
+    }
+    let data: Data
+    do { data = try Data(contentsOf: url, options: [.mappedIfSafe]) }
+    catch { throw ImgPasteError.configuration("configuration-unavailable") }
+    guard data.count <= maxStatusBytes,
+          let object = try? JSONSerialization.jsonObject(with: data),
+          let dictionary = object as? [String: Any] else {
+        throw ImgPasteError.configuration("configuration-invalid")
+    }
+    return (url, dictionary)
+}
+
+private func settingsString(_ dictionary: [String: Any], key: String, fallback: String) -> String {
+    guard let value = dictionary[key] as? String,
+          value.utf8.count <= 4_096,
+          !value.contains("\0"), !value.contains("\n"), !value.contains("\r") else { return fallback }
+    return value
+}
+
+private func settingsInteger(_ dictionary: [String: Any], key: String, fallback: Int) -> Int {
+    guard let value = dictionary[key] as? NSNumber else { return fallback }
+    let number = value.doubleValue
+    guard number.isFinite, number.rounded(.towardZero) == number,
+          number >= 1, number <= 60 else { return fallback }
+    return Int(number)
+}
+
+private func settingsForm(from dictionary: [String: Any]) -> SettingsForm {
+    SettingsForm(
+        hostAlias: settingsString(dictionary, key: "hostAlias", fallback: ""),
+        remoteDir: settingsString(dictionary, key: "remoteDir", fallback: "clipboard-images"),
+        remoteHome: settingsString(dictionary, key: "remoteHome", fallback: ""),
+        pollIntervalSeconds: settingsInteger(dictionary, key: "pollIntervalSeconds", fallback: 2)
+    )
+}
+
+private func printSettingsForm(_ settings: SettingsForm) -> Int32 {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    guard let data = try? encoder.encode(settings), let text = String(data: data, encoding: .utf8) else { return 1 }
+    print(text)
+    return 0
+}
+
+private func readSettings() -> Int32 {
+    guard let (_, dictionary) = try? settingsJSONObject() else {
+        fputs("Unable to read the local settings file. Open Advanced JSON to repair it.\n", stderr)
+        return 64
+    }
+    return printSettingsForm(settingsForm(from: dictionary))
+}
+
+private func settingsArguments() -> SettingsForm? {
+    let arguments = Array(CommandLine.arguments.dropFirst().dropFirst())
+    guard arguments.count == 8,
+          arguments[0] == "--host-alias", arguments[2] == "--remote-dir",
+          arguments[4] == "--remote-home", arguments[6] == "--poll-interval-seconds",
+          arguments[1].utf8.count <= 255, arguments[3].utf8.count <= 1_024,
+          arguments[5].utf8.count <= 1_024,
+          arguments[7].range(of: "^[0-9]{1,2}$", options: .regularExpression) != nil,
+          let interval = Int(arguments[7]) else { return nil }
+    return SettingsForm(hostAlias: arguments[1], remoteDir: arguments[3],
+                        remoteHome: arguments[5], pollIntervalSeconds: interval)
+}
+
+private func writePrivateConfiguration(_ data: Data, to url: URL) throws {
+    let directory = url.deletingLastPathComponent()
+    guard directory.resolvingSymlinksInPath().standardizedFileURL.path == directory.path else {
+        throw ImgPasteError.io("configuration-directory-unsafe")
+    }
+    let temporary = directory.appendingPathComponent(".imgpaste-settings-\(UUID().uuidString).tmp")
+    defer { try? FileManager.default.removeItem(at: temporary) }
+    guard FileManager.default.createFile(atPath: temporary.path, contents: data,
+                                         attributes: [.posixPermissions: 0o600]) else {
+        throw ImgPasteError.io("configuration-write-failed")
+    }
+    _ = chmod(temporary.path, S_IRUSR | S_IWUSR)
+    guard rename(temporary.path, url.path) == 0 else {
+        throw ImgPasteError.io("configuration-write-failed")
+    }
+    _ = chmod(url.path, S_IRUSR | S_IWUSR)
+}
+
+private func saveSettings() -> Int32 {
+    guard let update = settingsArguments() else {
+        fputs("Settings contain an unsupported value.\n", stderr)
+        return 64
+    }
+    do {
+        let (url, current) = try settingsJSONObject()
+        var candidate = current
+        candidate["hostAlias"] = update.hostAlias
+        candidate["remoteDir"] = update.remoteDir
+        candidate["remoteHome"] = update.remoteHome
+        candidate["pollIntervalSeconds"] = update.pollIntervalSeconds
+        let data = try JSONSerialization.data(withJSONObject: candidate, options: [.sortedKeys])
+        guard data.count <= maxStatusBytes else { throw ImgPasteError.configuration("configuration-too-large") }
+        _ = try configFromData(data)
+        try writePrivateConfiguration(data, to: url)
+        return printSettingsForm(update)
+    } catch {
+        fputs("Settings were not saved. Check the values or use Advanced JSON for other invalid settings.\n", stderr)
+        return 64
+    }
 }
 
 private func ensurePrivateDirectory(_ path: String) throws {
@@ -289,15 +450,32 @@ private func decodeStatus(_ path: String) -> Status? {
     return try? JSONDecoder().decode(Status.self, from: data)
 }
 
+private func decodeDoctorReport(_ path: String) -> DoctorReport? {
+    guard let text = readBoundedText(path, limit: maxStatusBytes), let data = text.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode(DoctorReport.self, from: data)
+}
+
+private func decodeBridgeReceipt(_ path: String) -> BridgeReceipt? {
+    guard let text = readBoundedText(path, limit: 4_096), let data = text.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode(BridgeReceipt.self, from: data)
+}
+
+private func doctorFields(_ config: Config) -> (String?, String?, String?) {
+    guard let report = decodeDoctorReport(config.doctorReportFile) else { return (nil, nil, nil) }
+    return (report.overall, report.summary, report.updatedAt)
+}
+
 private func writeStatus(_ config: Config, mode: String, state: String, error: String? = nil, activeChildPgid: Int? = nil, success: Bool = false) {
     let prior = decodeStatus(config.statusFile)
     let remote = readRemotePath(config)
+    let doctor = doctorFields(config)
     let status = Status(
         version: imgPasteVersion, mode: mode, pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
         state: state, lastSuccessAt: success ? ISO8601DateFormatter().string(from: Date()) : prior?.lastSuccessAt,
         lastError: error.map { redact($0, limit: 256) }, activeChildPgid: activeChildPgid,
-        capabilities: ["status", "start", "stop", "restart", "logs", "upload", "config"],
-        latestPath: remote, lastRemotePath: remote, logFile: config.logFile
+        capabilities: ["status", "start", "stop", "restart", "logs", "upload", "config", "settings-read", "settings-save", "doctor"],
+        latestPath: remote, lastRemotePath: remote, logFile: config.logFile,
+        doctorOverall: doctor.0, doctorSummary: doctor.1, doctorUpdatedAt: doctor.2
     )
     do {
         let encoder = JSONEncoder()
@@ -307,9 +485,12 @@ private func writeStatus(_ config: Config, mode: String, state: String, error: S
 }
 
 private func statusForUnavailableConfig() -> Status {
-    Status(version: imgPasteVersion, mode: "guardian", pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
+    let reportPath = URL(fileURLWithPath: defaultDataRoot()).appendingPathComponent("doctor-report.json").path
+    let report = decodeDoctorReport(reportPath)
+    return Status(version: imgPasteVersion, mode: "guardian", pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
            state: "configuration-invalid", lastSuccessAt: nil, lastError: "configuration-invalid", activeChildPgid: nil,
-           capabilities: ["status", "config"], latestPath: nil, lastRemotePath: nil, logFile: nil)
+           capabilities: ["status", "config", "settings-read", "settings-save", "doctor"], latestPath: nil, lastRemotePath: nil, logFile: nil,
+           doctorOverall: report?.overall, doctorSummary: report?.summary, doctorUpdatedAt: report?.updatedAt)
 }
 
 private final class BoundedCollector {
@@ -685,7 +866,7 @@ private func processFailure(_ result: ProcessResult, prefix: String) -> UploadRe
     return .failed("\(prefix)-failed")
 }
 
-private func uploadClipboard(_ config: Config, force: Bool, copyPath: Bool) -> UploadResult {
+private func uploadClipboard(_ config: Config, force: Bool, onUploading: (() -> Void)? = nil) -> UploadResult {
     guard let lock = FileLock(config.uploadLockFile) else { return .busy }
     _ = lock
     guard let bytes = clipboardPNG(), !bytes.isEmpty else { return .noImage }
@@ -698,7 +879,6 @@ private func uploadClipboard(_ config: Config, force: Bool, copyPath: Bool) -> U
     let latestLocal = URL(fileURLWithPath: config.cacheDirectory).appendingPathComponent("latest.png").path
     if !force, lastHash == hash, FileManager.default.fileExists(atPath: latestLocal) {
         let path = readRemotePath(config) ?? remotePath(config: config, leaf: "latest.png")
-        if copyPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path, forType: .string) }
         return .unchanged(path)
     }
     do { try ensurePrivateDirectory(config.cacheDirectory) }
@@ -707,6 +887,7 @@ private func uploadClipboard(_ config: Config, force: Bool, copyPath: Bool) -> U
     do { try writePrivateData(bytes, path: local) }
     catch { return .failed("cache-write-failed") }
     pruneCache(config, keeping: local)
+    onUploading?()
 
     let mkdirCommand = "mkdir -p \"$HOME/\(config.remoteDir)\""
     let mkdir = runProcess(executable: "/usr/bin/ssh", arguments: sshOptions + [config.hostAlias, mkdirCommand], timeoutSeconds: config.commandTimeoutSeconds, outputLimit: config.maxCommandOutputBytes)
@@ -738,11 +919,18 @@ private func uploadClipboard(_ config: Config, force: Bool, copyPath: Bool) -> U
     } catch { return .failed("state-write-failed") }
     pruneCache(config, keeping: local)
     log(config, "uploaded \(base) (\(bytes.count) bytes)")
-    if copyPath { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(path, forType: .string) }
     return .uploaded(path)
 }
 
-private func sleepSeconds(_ seconds: Int) { Thread.sleep(forTimeInterval: TimeInterval(seconds)) }
+@discardableResult
+private func sleepSeconds(_ seconds: Int, shouldContinue: @escaping () -> Bool = { terminationRequested == 0 }) -> Bool {
+    let deadline = Date().addingTimeInterval(TimeInterval(seconds))
+    while Date() < deadline {
+        guard shouldContinue() else { return false }
+        Thread.sleep(forTimeInterval: max(0.01, min(0.25, deadline.timeIntervalSinceNow)))
+    }
+    return shouldContinue()
+}
 
 private func runWatcher() -> Never {
     let config: Config
@@ -751,11 +939,14 @@ private func runWatcher() -> Never {
     guard let watcherLock = FileLock(config.watcherLockFile) else { exit(0) }
     _ = watcherLock
     installTerminationHandlers()
+    let guardianPID = getppid()
     log(config, "watcher started")
     var failures = 0
-    while terminationRequested == 0 {
+    while terminationRequested == 0 && getppid() == guardianPID {
         writeStatus(config, mode: "watch", state: "checking")
-        let result = uploadClipboard(config, force: false, copyPath: true)
+        let result = uploadClipboard(config, force: false) {
+            writeStatus(config, mode: "watch", state: "uploading")
+        }
         switch result {
         case .uploaded:
             failures = 0
@@ -770,7 +961,7 @@ private func runWatcher() -> Never {
         }
         let multiplier = min(failures, 5)
         let delay = min(60, config.pollIntervalSeconds * Int(pow(2.0, Double(multiplier))))
-        sleepSeconds(delay)
+        guard sleepSeconds(delay, shouldContinue: { terminationRequested == 0 && getppid() == guardianPID }) else { break }
     }
     exit(0)
 }
@@ -780,7 +971,7 @@ private func healthyWatcherStatus(_ status: Status?, pid: pid_t, staleSeconds: I
           let timestamp = ISO8601DateFormatter().date(from: status.updatedAt),
           Date().timeIntervalSince(timestamp) >= -5,
           Date().timeIntervalSince(timestamp) <= TimeInterval(staleSeconds) else { return false }
-    return ["checking", "healthy", "backoff"].contains(status.state)
+    return ["checking", "uploading", "healthy", "backoff"].contains(status.state)
 }
 
 private func startWatcher() -> Process? {
@@ -832,7 +1023,7 @@ private func runGuardian() -> Never {
                 log(config, "guardian restarted watcher after invalid or stale heartbeat")
                 worker = nil
             }
-            sleepSeconds(config.watchdogCheckSeconds)
+            guard sleepSeconds(config.watchdogCheckSeconds) else { break }
             // Reload after each interval so a fixed configuration becomes live
             // without a manual restart. The next outer iteration retains the
             // per-user guardian lock while changing no remote state.
@@ -853,10 +1044,330 @@ private func runGuardian() -> Never {
     exit(0)
 }
 
+private func isRegularNonSymlink(_ path: String) -> Bool {
+    var information = stat()
+    guard lstat(path, &information) == 0 else { return false }
+    return (information.st_mode & S_IFMT) == S_IFREG
+}
+
+private func projectRoot() -> String {
+    URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent().path
+}
+
+private func encodeDoctorReport(_ report: DoctorReport) -> Data? {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    return try? encoder.encode(report)
+}
+
+private func publishDoctorReport(_ report: DoctorReport, path: String?, persist: Bool = true) {
+    guard let data = encodeDoctorReport(report) else { return }
+    if persist, let path { try? writePrivateData(data, path: path) }
+    if let text = String(data: data, encoding: .utf8) { print(text) }
+}
+
+private func finalDoctorReport(checks: [DoctorCheck], repairs: [String]) -> DoctorReport {
+    let failed = checks.first { $0.status == "failed" }
+    let overall: String
+    let summary: String
+    if let failed {
+        overall = "needs-attention"
+        summary = failed.message
+    } else if repairs.isEmpty {
+        overall = "healthy"
+        summary = "All systems are operational."
+    } else {
+        overall = "repaired"
+        summary = repairs.count == 1 ? "Repaired 1 issue; all checks now pass." : "Repaired \(repairs.count) issues; all checks now pass."
+    }
+    return DoctorReport(version: "1", overall: overall,
+                        updatedAt: ISO8601DateFormatter().string(from: Date()),
+                        summary: summary, checks: checks, repairs: repairs)
+}
+
+private func localWatcherHealthy(_ config: Config, notBefore: Date? = nil) -> Bool {
+    guard let status = decodeStatus(config.statusFile),
+          let pid = pid_t(exactly: status.pid),
+          processIsAlive(pid),
+          healthyWatcherStatus(status, pid: pid, staleSeconds: config.watchdogStaleSeconds),
+          let updated = ISO8601DateFormatter().date(from: status.updatedAt) else { return false }
+    return notBefore.map { updated >= $0.addingTimeInterval(-1) } ?? true
+}
+
+private func processIsAlive(_ pid: pid_t) -> Bool {
+    guard pid > 1 else { return false }
+    if kill(pid, 0) == 0 { return true }
+    return errno == EPERM
+}
+
+private func waitForLocalWatcher(_ config: Config, notBefore: Date) -> Bool {
+    let deadline = Date().addingTimeInterval(8)
+    while Date() < deadline {
+        if localWatcherHealthy(config, notBefore: notBefore) { return true }
+        if terminationRequested != 0 { return false }
+        usleep(250_000)
+    }
+    return localWatcherHealthy(config, notBefore: notBefore)
+}
+
+private func repairLocalService(_ config: Config, checks: inout [DoctorCheck], repairs: inout [String]) {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    let plist = URL(fileURLWithPath: home).appendingPathComponent("Library/LaunchAgents/io.imgpaste.guardian.plist").path
+    let marker = "Managed by imgpaste install-macos.sh"
+    let domainLabel = "gui/\(getuid())/io.imgpaste.guardian"
+    let installer = URL(fileURLWithPath: projectRoot()).appendingPathComponent("macos/install-macos.sh").path
+
+    if FileManager.default.fileExists(atPath: plist) {
+        guard isRegularNonSymlink(plist), readBoundedText(plist, limit: maxStatusBytes)?.contains(marker) == true else {
+            checks.append(DoctorCheck(id: "local-service", status: "failed", message: "The local service has an ownership conflict."))
+            return
+        }
+    } else {
+        guard isRegularNonSymlink(installer) else {
+            checks.append(DoctorCheck(id: "local-service", status: "failed", message: "The local service installer is unavailable."))
+            return
+        }
+        let result = runProcess(executable: "/bin/bash", arguments: [installer, "--config", configPath()],
+                                timeoutSeconds: 180, outputLimit: config.maxCommandOutputBytes)
+        guard result.ok, isRegularNonSymlink(plist), readBoundedText(plist, limit: maxStatusBytes)?.contains(marker) == true else {
+            checks.append(DoctorCheck(id: "local-service", status: "failed", message: "The local service could not be reinstalled."))
+            return
+        }
+        repairs.append("local-service-installed")
+    }
+
+    let loaded = runProcess(executable: "/bin/launchctl", arguments: ["print", domainLabel],
+                            timeoutSeconds: 5, outputLimit: 4_096).ok
+    if loaded, localWatcherHealthy(config) {
+        checks.append(DoctorCheck(id: "local-service", status: "pass", message: "Automatic uploads are running."))
+        return
+    }
+
+    let repairStarted = Date()
+    let action: ProcessResult
+    if loaded {
+        action = runProcess(executable: "/bin/launchctl", arguments: ["kickstart", "-k", domainLabel],
+                            timeoutSeconds: 10, outputLimit: 4_096)
+    } else {
+        let domain = "gui/\(getuid())"
+        let bootstrap = runProcess(executable: "/bin/launchctl", arguments: ["bootstrap", domain, plist],
+                                   timeoutSeconds: 10, outputLimit: 4_096)
+        action = bootstrap.ok
+            ? runProcess(executable: "/bin/launchctl", arguments: ["kickstart", "-k", domainLabel],
+                         timeoutSeconds: 10, outputLimit: 4_096)
+            : bootstrap
+    }
+    guard action.ok, waitForLocalWatcher(config, notBefore: repairStarted) else {
+        checks.append(DoctorCheck(id: "local-service", status: "failed", message: "Automatic uploads could not be started."))
+        return
+    }
+    repairs.append(loaded ? "local-service-restarted" : "local-service-started")
+    checks.append(DoctorCheck(id: "local-service", status: "repaired", message: "Automatic uploads were restored."))
+}
+
+private func remoteBridgeDetectionCommand(remoteDir: String) -> String {
+    """
+    set -eu
+    a="$HOME/.config/systemd/user/io.imgpaste.codex-x11.service"
+    b="$HOME/.config/systemd/user/io.imgpaste.codex-x11-bridge.service"
+    if [ ! -e "$a" ] && [ ! -e "$b" ]; then printf 'absent'; exit 0; fi
+    if [ ! -f "$a" ] || [ -L "$a" ] || [ ! -f "$b" ] || [ -L "$b" ]; then printf 'conflict'; exit 20; fi
+    marker='# Managed by imgpaste install-codex-x11-bridge.sh'
+    grep -Fqx "$marker" "$a" && grep -Fqx "$marker" "$b" || { printf 'conflict'; exit 21; }
+    c="$HOME/.config/imgpaste/codex-x11.conf"
+    [ -f "$c" ] && [ ! -L "$c" ] || { printf 'partial'; exit 22; }
+    for key in display image_dir authority; do
+      count=$(grep -c "^$key=" "$c" || true)
+      [ "$count" = 1 ] || { printf 'partial'; exit 23; }
+    done
+    display=$(sed -n 's/^display=//p' "$c")
+    image_dir=$(sed -n 's/^image_dir=//p' "$c")
+    authority=$(sed -n 's/^authority=//p' "$c")
+    printf '%s' "$display" | grep -Eq '^:[0-9]+$' || { printf 'partial'; exit 23; }
+    match=0
+    [ "$image_dir" = "$HOME/\(remoteDir)" ] && match=1
+    [ "$authority" = "$HOME/"* ] && [ -f "$authority" ] && [ ! -L "$authority" ] || { printf 'partial'; exit 24; }
+    z=0
+    grep -Fqx '# >>> imgpaste Codex X11 >>>' "$HOME/.zshrc" 2>/dev/null && z=1
+    printf 'managed|%s|%s|%s' "$display" "$z" "$match"
+    """
+}
+
+private func remoteBridgeVerifyCommand(remoteDir: String) -> String {
+    """
+    set -eu
+    systemctl --user is-active --quiet io.imgpaste.codex-x11.service
+    systemctl --user is-active --quiet io.imgpaste.codex-x11-bridge.service
+    test -x "$HOME/.local/lib/imgpaste/imgpaste-codex-x11-test"
+    if [ ! -e "$HOME/\(remoteDir)/latest.png" ]; then printf 'pending'; exit 0; fi
+    "$HOME/.local/lib/imgpaste/imgpaste-codex-x11-test" >/dev/null
+    printf 'ready'
+    """
+}
+
+private func deployRemoteBridge(_ config: Config, receipt: BridgeReceipt) -> ProcessResult {
+    let deploy = URL(fileURLWithPath: projectRoot()).appendingPathComponent("macos/deploy-remote-codex-x11-bridge.sh").path
+    guard isRegularNonSymlink(deploy) else {
+        return ProcessResult(ok: false, timedOut: false, exitCode: nil, stdout: "", stderr: "deployment-script-unavailable", outputTruncated: false, processGroup: nil)
+    }
+    var arguments = [deploy, "--host", config.hostAlias, "--remote-dir", receipt.remoteDir, "--display", receipt.display,
+                     "--receipt", config.bridgeReceiptFile]
+    if !receipt.enableZsh { arguments.append("--no-zsh-env") }
+    let timeout = min(600, max(90, config.commandTimeoutSeconds * 6))
+    return runProcess(executable: "/bin/bash", arguments: arguments, timeoutSeconds: timeout,
+                      outputLimit: config.maxCommandOutputBytes)
+}
+
+private func writeBridgeReceipt(_ receipt: BridgeReceipt, config: Config) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    guard let data = try? encoder.encode(receipt) else { return }
+    try? writePrivateData(data, path: config.bridgeReceiptFile)
+}
+
+private func checkRemoteBridge(_ config: Config, remoteDir: String,
+                               checks: inout [DoctorCheck], repairs: inout [String]) {
+    let detection = runProcess(executable: "/usr/bin/ssh",
+                               arguments: sshOptions + [config.hostAlias, remoteBridgeDetectionCommand(remoteDir: remoteDir)],
+                               timeoutSeconds: config.commandTimeoutSeconds,
+                               outputLimit: config.maxCommandOutputBytes)
+    let token = detection.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    var receipt: BridgeReceipt?
+    var matchesCurrentDirectory = false
+
+    if detection.ok, token == "absent" {
+        if isRegularNonSymlink(config.bridgeReceiptFile) { try? FileManager.default.removeItem(atPath: config.bridgeReceiptFile) }
+        checks.append(DoctorCheck(id: "codex-bridge", status: "skipped", message: "Direct Codex image paste is not configured on this server."))
+        return
+    } else if detection.ok, token.hasPrefix("managed|") {
+        let fields = token.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 4, matches(fields[1], "^:[0-9]+$"), ["0", "1"].contains(fields[2]), ["0", "1"].contains(fields[3]) else {
+            checks.append(DoctorCheck(id: "codex-bridge", status: "failed", message: "The Codex image bridge configuration is invalid."))
+            return
+        }
+        receipt = BridgeReceipt(version: "1", hostAlias: config.hostAlias, remoteDir: remoteDir,
+                                display: fields[1], enableZsh: fields[2] == "1")
+        matchesCurrentDirectory = fields[3] == "1"
+    } else {
+        let message = token == "conflict" ? "The Codex image bridge has an ownership conflict." : "The Codex image bridge is incomplete."
+        checks.append(DoctorCheck(id: "codex-bridge", status: "failed", message: message))
+        return
+    }
+
+    guard let receipt else { return }
+    let verify = { () -> String? in
+        let result = runProcess(executable: "/usr/bin/ssh",
+                                arguments: sshOptions + [config.hostAlias, remoteBridgeVerifyCommand(remoteDir: remoteDir)],
+                                timeoutSeconds: config.commandTimeoutSeconds,
+                                outputLimit: config.maxCommandOutputBytes)
+        let status = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.ok && ["ready", "pending"].contains(status) ? status : nil
+    }
+    if matchesCurrentDirectory, let status = verify() {
+        writeBridgeReceipt(receipt, config: config)
+        let message = status == "ready"
+            ? "Direct Codex image paste is ready."
+            : "Direct Codex image paste is configured and waiting for the first upload."
+        checks.append(DoctorCheck(id: "codex-bridge", status: "pass", message: message))
+        return
+    }
+
+    let deployment = deployRemoteBridge(config, receipt: receipt)
+    guard deployment.ok, let status = verify() else {
+        let message = deployment.timedOut
+            ? "The Codex image bridge repair timed out."
+            : "The Codex image bridge could not be repaired. Check the remote package and service requirements."
+        checks.append(DoctorCheck(id: "codex-bridge", status: "failed", message: message))
+        return
+    }
+    writeBridgeReceipt(receipt, config: config)
+    repairs.append("codex-bridge-repaired")
+    let message = status == "ready"
+        ? "Direct Codex image paste was repaired."
+        : "Direct Codex image paste was repaired and is waiting for the first upload."
+    checks.append(DoctorCheck(id: "codex-bridge", status: "repaired", message: message))
+}
+
+private func runDoctor() -> Int32 {
+    installTerminationHandlers()
+    let config: Config
+    do {
+        config = try loadConfig()
+    } catch {
+        let report = finalDoctorReport(
+            checks: [DoctorCheck(id: "configuration", status: "failed", message: "Settings are invalid and need attention.")],
+            repairs: [])
+        let path = URL(fileURLWithPath: defaultDataRoot()).appendingPathComponent("doctor-report.json").path
+        publishDoctorReport(report, path: path)
+        return 1
+    }
+    guard let doctorLock = FileLock(config.doctorLockFile) else {
+        let report = finalDoctorReport(
+            checks: [DoctorCheck(id: "doctor", status: "failed", message: "Another repair check is already running.")],
+            repairs: [])
+        publishDoctorReport(report, path: nil, persist: false)
+        return 75
+    }
+    _ = doctorLock
+
+    var checks = [DoctorCheck(id: "configuration", status: "pass", message: "Settings are valid.")]
+    var repairs: [String] = []
+    repairLocalService(config, checks: &checks, repairs: &repairs)
+
+    let ssh = runProcess(executable: "/usr/bin/ssh", arguments: sshOptions + [config.hostAlias, "true"],
+                         timeoutSeconds: config.commandTimeoutSeconds, outputLimit: config.maxCommandOutputBytes)
+    if !ssh.ok {
+        let message = ssh.timedOut ? "The SSH server did not respond in time." : "The SSH server is unreachable or authentication failed."
+        checks.append(DoctorCheck(id: "ssh", status: "failed", message: message))
+        checks.append(DoctorCheck(id: "remote-directory", status: "skipped", message: "The upload directory could not be checked."))
+        checks.append(DoctorCheck(id: "codex-bridge", status: "skipped", message: "The Codex image bridge could not be checked."))
+    } else {
+        checks.append(DoctorCheck(id: "ssh", status: "pass", message: "The SSH server is reachable."))
+        let remoteDir = config.remoteDir.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let directoryCommand = """
+        set -eu
+        d="$HOME/\(remoteDir)"
+        if [ -d "$d" ]; then state=present; else mkdir -p "$d"; state=created; fi
+        probe="$d/.imgpaste-doctor-$$"
+        trap 'rm -f "$probe"' EXIT HUP INT TERM
+        : > "$probe"
+        printf '%s' "$state"
+        """
+        let directory = runProcess(executable: "/usr/bin/ssh",
+                                   arguments: sshOptions + [config.hostAlias, directoryCommand],
+                                   timeoutSeconds: config.commandTimeoutSeconds,
+                                   outputLimit: config.maxCommandOutputBytes)
+        if directory.ok {
+            let created = directory.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "created"
+            if created { repairs.append("remote-directory-created") }
+            checks.append(DoctorCheck(id: "remote-directory", status: created ? "repaired" : "pass",
+                                      message: created ? "The remote upload directory was created." : "The remote upload directory is writable."))
+            checkRemoteBridge(config, remoteDir: remoteDir, checks: &checks, repairs: &repairs)
+        } else {
+            checks.append(DoctorCheck(id: "remote-directory", status: "failed", message: "The remote upload directory is not writable."))
+            checks.append(DoctorCheck(id: "codex-bridge", status: "skipped", message: "The Codex image bridge was not changed."))
+        }
+    }
+
+    let report = finalDoctorReport(checks: checks, repairs: repairs)
+    publishDoctorReport(report, path: config.doctorReportFile)
+    log(config, "doctor \(report.overall): \(report.summary)")
+    return report.overall == "needs-attention" ? 1 : 0
+}
+
 private func printStatus() {
     let status: Status
     if let config = try? loadConfig(), let saved = decodeStatus(config.statusFile) {
-        status = saved
+        let doctor = doctorFields(config)
+        status = Status(version: saved.version, mode: saved.mode, pid: saved.pid, updatedAt: saved.updatedAt,
+                        state: saved.state, lastSuccessAt: saved.lastSuccessAt, lastError: saved.lastError,
+                        activeChildPgid: saved.activeChildPgid,
+                        capabilities: ["status", "start", "stop", "restart", "logs", "upload", "config", "settings-read", "settings-save", "doctor"],
+                        latestPath: saved.latestPath, lastRemotePath: saved.lastRemotePath, logFile: saved.logFile,
+                        doctorOverall: doctor.0, doctorSummary: doctor.1, doctorUpdatedAt: doctor.2)
     } else {
         status = statusForUnavailableConfig()
     }
@@ -878,7 +1389,7 @@ private func uploadNow() -> Int32 {
     // Do not overwrite the watcher's heartbeat/status record. The guardian
     // authenticates that record against its child PID, so a concurrent tray
     // action must remain an independent, lock-serialized operation.
-    let result = uploadClipboard(config, force: true, copyPath: true)
+    let result = uploadClipboard(config, force: true)
     switch result {
     case .uploaded, .unchanged:
         return 0
@@ -942,7 +1453,26 @@ private func runSelfTest() -> Int32 {
         fputs("self-test output bound failed\n", stderr)
         return 1
     }
-    print("PASS: macOS config validation, redaction, timeout bound, output bound, and child cleanup path")
+    let uploadingStatus = Status(version: imgPasteVersion, mode: "watch", pid: 42,
+                                 updatedAt: ISO8601DateFormatter().string(from: Date()), state: "uploading",
+                                 lastSuccessAt: nil, lastError: nil, activeChildPgid: nil, capabilities: [],
+                                 latestPath: nil, lastRemotePath: nil, logFile: nil,
+                                 doctorOverall: nil, doctorSummary: nil, doctorUpdatedAt: nil)
+    guard healthyWatcherStatus(uploadingStatus, pid: 42, staleSeconds: 10) else {
+        fputs("self-test uploading status failed\n", stderr)
+        return 1
+    }
+    let passCheck = DoctorCheck(id: "ssh", status: "pass", message: "ready")
+    let repairedCheck = DoctorCheck(id: "local-service", status: "repaired", message: "restored")
+    let failedCheck = DoctorCheck(id: "ssh", status: "failed", message: "unreachable")
+    guard finalDoctorReport(checks: [passCheck], repairs: []).overall == "healthy",
+          finalDoctorReport(checks: [passCheck, repairedCheck], repairs: ["local-service-started"]).overall == "repaired",
+          finalDoctorReport(checks: [passCheck, failedCheck], repairs: []).overall == "needs-attention",
+          finalDoctorReport(checks: [passCheck, failedCheck], repairs: []).summary == "unreachable" else {
+        fputs("self-test doctor report failed\n", stderr)
+        return 1
+    }
+    print("PASS: macOS config validation, redaction, process bounds, and Doctor report self-test")
     return 0
 }
 
@@ -962,9 +1492,12 @@ case "watch": runWatcher()
 case "status": printStatus()
 case "logs": exit(printLogs())
 case "upload": exit(uploadNow())
+case "doctor": exit(runDoctor())
+case "settings-read": exit(readSettings())
+case "settings-save": exit(saveSettings())
 case "self-test": exit(runSelfTest())
 case "validate-config": exit(validateConfiguration())
 default:
-    fputs("Usage: imgpaste-macos [guardian|watch|status|logs|upload|self-test|validate-config]\n", stderr)
+    fputs("Usage: imgpaste-macos [guardian|watch|status|logs|upload|doctor|settings-read|settings-save|self-test|validate-config]\n", stderr)
     exit(64)
 }

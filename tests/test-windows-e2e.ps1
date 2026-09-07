@@ -107,16 +107,16 @@ public static class FakeOpenSsh {
 
     # A minimal valid PNG is enough to exercise content hashing/cache names.
     $script:e2eBytes = [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLw8QAAAABJRU5ErkJggg==")
-    $script:e2eClipboardValue = ""
+    $script:e2eClipboardValue = "image-clipboard-preserved"
     function Get-ClipboardImageBytes { return $script:e2eBytes }
     function Test-ImgPasteClipboardHash { param([string]$ExpectedHash) return ((Get-BytesHash -Bytes $script:e2eBytes) -eq $ExpectedHash) }
     function Set-Clipboard { param([string]$Value) $script:e2eClipboardValue = $Value }
 
-    $first = Publish-ClipboardImage -CopyPath -Force
+    $first = Publish-ClipboardImage -Force
     Assert-ImgPasteE2E $first.Ok "The isolated first upload failed: $($first.Reason) $($first.Detail)"
     Assert-ImgPasteE2E ($first.Reason -eq "uploaded") "The first upload did not report uploaded."
     Assert-ImgPasteE2E ($first.RemotePath -match '^/e2e-home/clipboard-images/clip-[a-f0-9]{64}\.png$') "The returned remote path was unsafe or unexpected."
-    Assert-ImgPasteE2E ($script:e2eClipboardValue -eq $first.RemotePath) "CopyPath did not receive the uploaded remote path."
+    Assert-ImgPasteE2E ($script:e2eClipboardValue -eq "image-clipboard-preserved") "An automatic upload replaced the image clipboard with text."
     Assert-ImgPasteE2E (Test-Path -LiteralPath $first.LocalFile) "The local cache file was not retained."
 
     $remoteFile = Join-Path $remoteRoot ("clipboard-images\" + [IO.Path]::GetFileName($first.LocalFile))
@@ -125,6 +125,11 @@ public static class FakeOpenSsh {
     Assert-ImgPasteE2E (Test-Path -LiteralPath $latestFile) "The isolated latest.png update was not created."
     Assert-ImgPasteE2E ((Get-FileHash -LiteralPath $remoteFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $first.LocalFile -Algorithm SHA256).Hash) "The uploaded remote bytes differ from the local cached PNG."
     Assert-ImgPasteE2E ((Get-FileHash -LiteralPath $latestFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $remoteFile -Algorithm SHA256).Hash) "latest.png does not match the uploaded PNG."
+
+    $watchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\imgpaste-watch.ps1") -Raw
+    $nowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\imgpaste-now.ps1") -Raw
+    Assert-ImgPasteE2E ($watchSource -notmatch 'Publish-ClipboardImage\s+-CopyPath') "The automatic watcher still requests clipboard text replacement."
+    Assert-ImgPasteE2E ($nowSource -notmatch 'Publish-ClipboardImage\s+-CopyPath') "The one-shot uploader still requests clipboard text replacement."
 
     $operations = Get-Content -LiteralPath $logPath
     Assert-ImgPasteE2E ($operations.Count -eq 6) "Expected three isolated process invocations (six log lines), found $($operations.Count)."

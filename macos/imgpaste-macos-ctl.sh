@@ -9,7 +9,8 @@ set -euo pipefail
 IFS=$'\n\t'
 
 readonly label='io.imgpaste.guardian'
-readonly status_capabilities='["status","start","stop","restart","logs","upload","config"]'
+readonly status_capabilities='["status","start","stop","restart","logs","upload","config","settings-read","settings-save","doctor"]'
+readonly recovery_capabilities='["status","config","settings-read","settings-save","doctor"]'
 
 die() {
   printf 'imgpaste control: %s\n' "$*" >&2
@@ -18,9 +19,13 @@ die() {
 
 usage() {
   cat <<'USAGE'
-Usage: ./macos/imgpaste-macos-ctl.sh <action>
+Usage: ./macos/imgpaste-macos-ctl.sh <action> [arguments]
 
-Actions: status, start, stop, restart, logs, upload, config
+Actions: status, start, stop, restart, logs, upload, config, doctor,
+         settings-read, settings-save
+
+settings-save accepts only:
+  --host-alias HOST --remote-dir FOLDER --remote-home HOME --poll-interval-seconds SECONDS
 USAGE
 }
 
@@ -57,9 +62,9 @@ absolute_existing_file() {
 emit_status() {
   # Every value here is static. Never include config contents, hosts, paths,
   # subprocess output, or credentials in a fallback status response.
-  local state=$1 message=$2
-  printf '{"version":"1","mode":"macos","pid":null,"updatedAt":null,"state":"%s","lastSuccessAt":null,"lastError":"%s","activeChildPgid":null,"capabilities":%s,"latestPath":null,"lastRemotePath":null,"logFile":null}\n' \
-    "$state" "$message" "$status_capabilities"
+  local state=$1 message=$2 capabilities=${3:-$status_capabilities}
+  printf '{"version":"1","mode":"macos","pid":null,"updatedAt":null,"state":"%s","lastSuccessAt":null,"lastError":"%s","activeChildPgid":null,"capabilities":%s,"latestPath":null,"lastRemotePath":null,"logFile":null,"doctorOverall":null,"doctorSummary":null,"doctorUpdatedAt":null}\n' \
+    "$state" "$message" "$capabilities"
 }
 
 resolve_config() {
@@ -111,10 +116,21 @@ require_config() {
     die "Configuration is missing or unsafe. Create or repair: $default_config"
 }
 
-(( $# == 1 )) || { usage >&2; exit 2; }
+settings_save_arguments_are_shaped() {
+  (( $# == 8 )) && \
+    [[ "$1" == '--host-alias' && "$3" == '--remote-dir' && "$5" == '--remote-home' && "$7" == '--poll-interval-seconds' ]]
+}
+
+(( $# >= 1 )) || { usage >&2; exit 2; }
 action=$1
+shift
 case "$action" in
-  status|start|stop|restart|logs|upload|config) ;;
+  status|start|stop|restart|logs|upload|config|doctor|settings-read)
+    (( $# == 0 )) || { usage >&2; exit 2; }
+    ;;
+  settings-save)
+    settings_save_arguments_are_shaped "$@" || { usage >&2; exit 2; }
+    ;;
   -h|--help) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -141,11 +157,11 @@ plist="$launch_agents/$label.plist"
 case "$action" in
   status)
     if [[ ! -x "$executable" || -L "$executable" ]]; then
-      emit_status 'not-installed' 'The native imgpaste executable is not installed.'
+      emit_status 'not-installed' 'The native imgpaste executable is not installed.' "$recovery_capabilities"
       exit 0
     fi
     if ! config_file=$(resolve_config); then
-      emit_status 'configuration-invalid' 'The local JSON configuration is missing or unsafe.'
+      emit_status 'configuration-invalid' 'The local JSON configuration is missing or unsafe.' "$recovery_capabilities"
       exit 0
     fi
     if ! job_loaded; then
@@ -153,7 +169,7 @@ case "$action" in
       exit 0
     fi
     if ! owned_plist; then
-      emit_status 'ownership-conflict' 'A same-label LaunchAgent is loaded but is not owned by this checkout.'
+      emit_status 'ownership-conflict' 'A same-label LaunchAgent is loaded but is not owned by this checkout.' "$recovery_capabilities"
       exit 0
     fi
     exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" status
@@ -201,5 +217,43 @@ case "$action" in
   config)
     require_config
     exec /usr/bin/open "$config_file"
+    ;;
+  settings-read)
+    require_binary
+    require_config
+    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" settings-read
+    ;;
+  settings-save)
+    require_binary
+    require_config
+    native_settings_arguments=(settings-save "$@")
+    /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" "${native_settings_arguments[@]}" >/dev/null
+    if job_loaded; then
+      if [[ ! -L "$launch_agents" ]] && owned_plist; then
+        if /bin/launchctl kickstart -k "$domain/$label"; then
+          printf '%s\n' 'Settings saved and automatic uploads restarted.'
+        else
+          printf '%s\n' 'Settings saved, but automatic uploads could not restart. Choose Check & Repair in the menu bar app.'
+        fi
+      else
+        printf '%s\n' 'Settings saved. Automatic uploads were not restarted because this checkout does not own the local service.'
+      fi
+    else
+      printf '%s\n' 'Settings saved. Automatic uploads remain paused.'
+    fi
+    ;;
+  doctor)
+    if ! config_file=$(resolve_config); then config_file=$default_config; fi
+    if [[ ! -x "$executable" || -L "$executable" ]]; then
+      installer="$script_dir/install-macos.sh"
+      [[ -f "$installer" && ! -L "$installer" ]] || die 'The native installer is unavailable.'
+      if [[ -f "$config_file" && ! -L "$config_file" ]]; then
+        /bin/bash "$installer" --config "$config_file" >/dev/null
+      else
+        /bin/bash "$installer" >/dev/null
+      fi
+    fi
+    require_binary
+    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" doctor
     ;;
 esac
