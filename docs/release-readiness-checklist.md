@@ -1,20 +1,17 @@
-# Private release-readiness checklist
+# Release-readiness checklist
 
-Use this checklist before sharing a private build or exporting a clean release
-candidate. It does not authorize making a repository public.
+Use this checklist before creating a public or private cpcv release.
 
 ## Source and privacy
 
-- [ ] The active repository, candidate repository, and any artifacts are still
-      private unless the owner has explicitly changed that state.
 - [ ] `git status --short` contains only the reviewed change set.
 - [ ] No tracked file contains a real host alias, username, local path,
       screenshot, log, cache entry, token, private key, credential, or proxy
       URL.
-- [ ] README examples use placeholders and do not require a public URL,
-      download page, GitHub account, or hosted service.
-- [ ] Runtime archive history is not merged, rebased, cherry-picked, or pushed
-      into the clean candidate; use the committed-tree export procedure.
+- [ ] README examples use placeholders; public download instructions do not
+      contain local paths, hosts, credentials, or an auto-update mechanism.
+- [ ] If a private runtime archive is used, only a reviewed committed-tree export
+      reaches the release candidate.
 
 ## Behavior and reliability
 
@@ -52,13 +49,21 @@ candidate. It does not authorize making a repository public.
 
 - [ ] The clean candidate's file diff, full reachable history, remote, and
       visibility have been reviewed.
-- [ ] Candidate CI is green; skipped private-only security products are recorded
-      as skipped, not as passed.
+- [ ] Candidate CI is green; the release tag is annotated, stable SemVer, and
+      matches `VERSION`, the macOS source version, and its changelog heading.
 - [ ] The Windows archive was produced from a clean committed tree, contains
       the branded assets, excludes private runtime state, and passes its safe
       extracted-source checks.
+- [ ] The macOS archive was produced from committed source plus verified
+      universal arm64/x86_64 binaries, excludes private runtime state, and
+      passes both native self-tests.
+- [ ] `SHA256SUMS.txt` has been generated from the exact release assets and
+      successfully verifies them.
 - [ ] A live SSH transfer is called successful only when run against an
       authorized host and documented separately from network-free tests.
-- [ ] Do not publish unsigned binary artifacts as production releases. Before
-      public distribution, add reviewed signing/notarization, checksums, and
+- [ ] The release notes accurately state that the macOS binaries are ad-hoc
+      signed but not notarized; they do not claim Developer ID or production
+      signing.
+- [ ] Before claiming a production-signed binary release, add reviewed Apple
+      notarization and Windows Authenticode, protected CI secrets, and
       fresh-machine verification for every supported architecture.

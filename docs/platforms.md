@@ -1,8 +1,7 @@
 # Platform support
 
-cpcv is a private-first, local clipboard-to-SSH utility. It does not need a
-public repository, a hosted service, a replacement screenshot app, or an
-administrator-installed background service.
+cpcv is a local clipboard-to-SSH utility. It does not need a hosted service, a
+replacement screenshot app, or an administrator-installed background service.
 
 ## Current support
 
@@ -35,18 +34,21 @@ or source.
 
 ## macOS lifecycle
 
-macOS support is source-installed, not a signed application bundle. It requires
-macOS 11 or newer, Xcode Command Line Tools, and a logged-in graphical desktop
-session. It uses only these project-owned user labels:
+macOS support requires macOS 11 or newer and a logged-in graphical desktop
+session. A source checkout builds with Xcode Command Line Tools; the portable
+release bundle supplies prebuilt universal binaries and uses `--prebuilt` to
+avoid that compiler requirement. It uses only these project-owned user labels:
 
 - `io.cpcv.guardian` runs the native guardian in `gui/$UID`.
 - `io.cpcv.tray` runs the optional menu-bar companion in `gui/$UID`.
 
-`macos/install-macos.sh` builds the native uploader with `swiftc`, records the
-selected private configuration path, writes a managed LaunchAgent, and starts
-the guardian. `macos/install-tray.sh` builds and installs the optional menu
-bar companion after the uploader is present. Both reject `sudo`, a missing GUI
-domain, a symlinked target, and an unrelated existing LaunchAgent label.
+`macos/install-macos.sh` builds the native uploader with `swiftc` by default,
+or validates a release bundle's prebuilt executable with `--prebuilt`; it then
+records the selected private configuration path, writes a managed LaunchAgent,
+and starts the guardian. `macos/install-tray.sh` follows the same source or
+prebuilt choice for the optional menu-bar companion. Both reject `sudo`, a
+missing GUI domain, a symlinked target, and an unrelated existing LaunchAgent
+label.
 The guardian and optional tray have a fixed PATH containing standard system
 locations plus the Apple Silicon and Intel Homebrew locations, so an SSH
 `ProxyCommand` can use tools such as `cloudflared` when cpcv runs in the
@@ -78,6 +80,9 @@ path, control the local service, and open local diagnostics. On Windows,
 clear health banner, automatic-upload/heartbeat/latest-image cards, an
 explicit refresh control, and context-sensitive recovery guidance. It keeps
 remote paths out of casual display; use **Copy latest path** when you need it.
+Its notification-area hover text and dashboard report the age of the last
+successful upload when the service is healthy, without revealing an SSH host or
+remote path.
 Neither interface accepts arbitrary commands, exposes raw SSH output in a
 tooltip, or holds SSH credentials.
 
@@ -166,9 +171,13 @@ Every platform implementation must preserve these guarantees:
 
 ## Packaging boundary
 
-The macOS client and menu-bar app compile locally from source. They are not
-notarized, code-signed app bundles. Do not describe them as such or distribute
-unsigned binaries as a production download. A future binary release needs
-separate signing identities, protected CI secrets, checksums, notarization,
-and fresh-machine verification. Keep the repository and all artifacts private
-until the owner explicitly changes that decision.
+GitHub Releases contain portable ZIPs and `SHA256SUMS.txt`. The Windows asset
+contains transparent PowerShell source and installers, not an EXE or MSI. The
+macOS asset contains source plus ad-hoc-signed universal `arm64` and `x86_64`
+executables. It is not a Developer ID signed, notarized application bundle, so
+Gatekeeper can require an explicit user approval after the ZIP checksum is
+verified. Do not describe the macOS asset as notarized or production-signed.
+
+A future production binary release needs separate Apple Developer ID and
+Windows Authenticode signing identities, protected CI secrets, notarization,
+and fresh-machine verification for every supported architecture.

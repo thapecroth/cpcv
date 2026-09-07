@@ -18,12 +18,13 @@ die() {
 
 usage() {
   cat <<'USAGE'
-Usage: ./macos/install-macos.sh [--config /absolute/path/config.json] [--no-start]
+Usage: ./macos/install-macos.sh [--config /absolute/path/config.json] [--no-start] [--prebuilt]
 
-Builds macos/cpcv-macos.swift into macos/build/cpcv-macos, creates a
-private default configuration when needed, and installs a LaunchAgent in the
-current logged-in user's GUI launchd domain. Existing data and configuration
-are never replaced.
+By default, builds macos/cpcv-macos.swift into macos/build/cpcv-macos. With
+--prebuilt, validates and uses the regular bundled executable already at that
+path without invoking swiftc. It creates a private default configuration when
+needed and installs a LaunchAgent in the current logged-in user's GUI launchd
+domain. Existing data and configuration are never replaced.
 USAGE
 }
 
@@ -104,6 +105,7 @@ job_loaded() {
 
 config_override=${CPCV_CONFIG:-}
 start_after_install=1
+use_prebuilt=0
 while (($#)); do
   case "$1" in
     --config)
@@ -113,6 +115,10 @@ while (($#)); do
       ;;
     --no-start)
       start_after_install=0
+      shift
+      ;;
+    --prebuilt)
+      use_prebuilt=1
       shift
       ;;
     -h|--help)
@@ -149,11 +155,13 @@ launch_agents="$home_dir/Library/LaunchAgents"
 plist="$launch_agents/$label.plist"
 launchd_log="$state_dir/launchd.log"
 
-[[ -f "$source_file" ]] || die "Missing native source: $source_file"
+if (( ! use_prebuilt )); then
+  [[ -f "$source_file" ]] || die "Missing native source: $source_file"
+  command -v swiftc >/dev/null 2>&1 || \
+    die 'Swift compiler not found. Install Xcode Command Line Tools with: xcode-select --install'
+fi
 [[ -f "$template" ]] || die "Missing LaunchAgent template: $template"
 [[ -f "$example_config" ]] || die "Missing configuration example: $example_config"
-command -v swiftc >/dev/null 2>&1 || \
-  die 'Swift compiler not found. Install Xcode Command Line Tools with: xcode-select --install'
 
 # A label is global within a GUI launchd domain. Do not unload a job merely
 # because it happens to use cpcv's label; prove this checkout owns the
@@ -199,15 +207,23 @@ trap - EXIT
 /bin/mkdir -p -- "$build_dir"
 /bin/chmod 700 "$build_dir"
 [[ ! -L "$executable" ]] || die "Refusing symlinked executable path: $executable"
-build_tmp=$(/usr/bin/mktemp -d "$build_dir/.cpcv-build.XXXXXX")
-trap '/bin/rm -rf -- "$build_tmp"' EXIT
-swiftc -O -framework AppKit "$source_file" -o "$build_tmp/cpcv-macos"
-[[ -x "$build_tmp/cpcv-macos" ]] || die 'Swift compilation did not produce an executable.'
-"$build_tmp/cpcv-macos" self-test >/dev/null
-/bin/chmod 700 "$build_tmp/cpcv-macos"
-/bin/mv -f -- "$build_tmp/cpcv-macos" "$executable"
-/bin/rmdir -- "$build_tmp"
-trap - EXIT
+if (( use_prebuilt )); then
+  [[ -x "$executable" && ! -L "$executable" ]] || \
+    die "--prebuilt requires a regular executable at $executable"
+  "$executable" self-test >/dev/null || \
+    die 'The bundled native executable did not pass its self-test.'
+  printf '%s\n' 'Using the bundled prebuilt macOS executable (ad-hoc signed; not notarized).'
+else
+  build_tmp=$(/usr/bin/mktemp -d "$build_dir/.cpcv-build.XXXXXX")
+  trap '/bin/rm -rf -- "$build_tmp"' EXIT
+  swiftc -O -framework AppKit "$source_file" -o "$build_tmp/cpcv-macos"
+  [[ -x "$build_tmp/cpcv-macos" ]] || die 'Swift compilation did not produce an executable.'
+  "$build_tmp/cpcv-macos" self-test >/dev/null
+  /bin/chmod 700 "$build_tmp/cpcv-macos"
+  /bin/mv -f -- "$build_tmp/cpcv-macos" "$executable"
+  /bin/rmdir -- "$build_tmp"
+  trap - EXIT
+fi
 
 [[ ! -L "$plist" ]] || die "Refusing symlinked LaunchAgent path: $plist"
 [[ ! -L "$launch_agents" ]] || die "Refusing symlinked LaunchAgents directory: $launch_agents"

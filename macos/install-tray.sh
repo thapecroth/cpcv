@@ -10,6 +10,31 @@ die() {
   exit 1
 }
 
+usage() {
+  cat <<'USAGE'
+Usage: ./macos/install-tray.sh [--prebuilt]
+
+By default, builds the native menu-bar companion from source. With --prebuilt,
+validates and uses macos/build/cpcv-tray from a release bundle without invoking
+swiftc.
+USAGE
+}
+
+use_prebuilt=0
+while (($#)); do
+  case "$1" in
+    --prebuilt)
+      use_prebuilt=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *) die "Unknown option: $1" ;;
+  esac
+done
+
 require_macos_gui_user() {
   [[ "$(/usr/bin/uname -s)" == 'Darwin' ]] || die 'This installer is for macOS.'
   local current_uid
@@ -36,11 +61,6 @@ job_loaded() {
   launchctl print "$domain/$label" >/dev/null 2>&1
 }
 
-if ! command -v swiftc >/dev/null 2>&1; then
-  printf '%s\n' "cpcv tray requires Apple's Swift compiler. Install it with: xcode-select --install" >&2
-  exit 1
-fi
-
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 launcher="$script_dir/cpcv-tray.sh"
 controller="$script_dir/cpcv-macos-ctl.sh"
@@ -60,19 +80,31 @@ plist="$launch_agents/$label.plist"
 [[ -x "$launcher" && ! -L "$launcher" ]] || { printf '%s\n' "Missing safe executable launcher: $launcher" >&2; exit 1; }
 [[ -x "$controller" && ! -L "$controller" ]] || { printf '%s\n' "Missing safe executable macOS controller: $controller. Install the macOS uploader first." >&2; exit 1; }
 [[ -f "$template" ]] || { printf '%s\n' "Missing template: $template" >&2; exit 1; }
-[[ -f "$source_file" && ! -L "$source_file" ]] || { printf '%s\n' "Missing tray source: $source_file" >&2; exit 1; }
+if (( ! use_prebuilt )); then
+  [[ -f "$source_file" && ! -L "$source_file" ]] || { printf '%s\n' "Missing tray source: $source_file" >&2; exit 1; }
+  if ! command -v swiftc >/dev/null 2>&1; then
+    printf '%s\n' "cpcv tray requires Apple's Swift compiler. Install it with: xcode-select --install" >&2
+    exit 1
+  fi
+fi
 [[ -x "$uploader_bin" && ! -L "$uploader_bin" ]] || { printf '%s\n' "Install the native macOS uploader first: $script_dir/install-macos.sh" >&2; exit 1; }
 [[ ! -L "$build_dir" ]] || { printf '%s\n' "Refusing symlinked build directory: $build_dir" >&2; exit 1; }
 mkdir -p "$build_dir"
 chmod 700 "$build_dir"
 [[ ! -L "$tray_bin" ]] || { printf '%s\n' "Refusing symlinked tray binary: $tray_bin" >&2; exit 1; }
-build_tmp=$(mktemp -d "$build_dir/.cpcv-tray-build.XXXXXX")
-trap 'rm -rf -- "$build_tmp"' EXIT
-swiftc -O -parse-as-library -framework AppKit "$source_file" -o "$build_tmp/cpcv-tray"
-chmod 700 "$build_tmp/cpcv-tray"
-mv -f -- "$build_tmp/cpcv-tray" "$tray_bin"
-rmdir -- "$build_tmp"
-trap - EXIT
+if (( use_prebuilt )); then
+  [[ -x "$tray_bin" && ! -L "$tray_bin" ]] || { printf '%s\n' "--prebuilt requires a regular executable at $tray_bin" >&2; exit 1; }
+  "$tray_bin" self-test >/dev/null || { printf '%s\n' 'The bundled tray executable did not pass its self-test.' >&2; exit 1; }
+  printf '%s\n' 'Using the bundled prebuilt macOS tray executable (ad-hoc signed; not notarized).'
+else
+  build_tmp=$(mktemp -d "$build_dir/.cpcv-tray-build.XXXXXX")
+  trap 'rm -rf -- "$build_tmp"' EXIT
+  swiftc -O -parse-as-library -framework AppKit "$source_file" -o "$build_tmp/cpcv-tray"
+  chmod 700 "$build_tmp/cpcv-tray"
+  mv -f -- "$build_tmp/cpcv-tray" "$tray_bin"
+  rmdir -- "$build_tmp"
+  trap - EXIT
+fi
 [[ ! -L "$launch_agents" ]] || die "Refusing symlinked LaunchAgents directory: $launch_agents"
 existing_managed_plist=0
 if [[ -e "$plist" ]]; then

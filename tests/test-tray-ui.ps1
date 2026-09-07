@@ -100,6 +100,8 @@ $baseState = [pscustomobject]@{
     Heartbeat = [pscustomobject]@{ ProcessId = 202; Status = 'idle failures=0' }
     HeartbeatAgeSeconds = 1.2
     LatestPath = '/home/tester/clipboard-images/latest.png'
+    LatestUploadAt = [DateTimeOffset]::UtcNow
+    LatestUploadAgeSeconds = 1.2
 }
 
 Invoke-CpcvTrayDialogProbe -State $baseState -Action upload

@@ -14,8 +14,8 @@ the macOS job must not read a real system clipboard.
 | Tray/status | Branded multi-size icon probe, bounded tooltip, and an off-screen synthetic dashboard action test | Native tray source build and fixed controller/status contract |
 | Network | A compiled temporary fake `ssh.exe`/`scp.exe` exercises mkdir → copy → latest, failure, and recovery without a host | No SSH, `launchctl`, or clipboard calls in `macos/test-macos.sh` |
 
-The CI workflow runs Windows and `macos-latest` jobs even while the repository
-is private. The native macOS test entry point is:
+The CI workflow runs Windows and `macos-latest` jobs. The native macOS test
+entry point is:
 
 ```bash
 bash macos/test-macos.sh
@@ -53,13 +53,19 @@ checks cannot leave a dialog on a contributor's desktop.
 Build validation should also extract the archive into a path containing spaces
 and run the Windows suite there. That catches quoting regressions in local
 PowerShell launcher paths before a user installs from a normal Downloads or
-Documents folder.
+Documents folder. `macos/build-macos.sh` constructs release bundles from
+`git archive` plus universal arm64/x86_64 binaries, verifies their code
+signatures and self-tests, then checks that the ZIP excludes local state.
 
-## Private-repository CI
+## Release CI
 
-The base CI workflow is intended to remain useful while the repository is
-private. CodeQL is deliberately skipped for a private repository unless the
-owner enables the required GitHub Code Security capability; record a skipped
-scan as skipped, not passed. Keep artifacts private. Signing/notarization
-credentials belong only in protected CI secrets after the owner deliberately
-adds a signed binary release process.
+Pushing an annotated stable SemVer tag from `main` starts the release workflow.
+It validates the tag against `VERSION`, the native macOS source version, and a
+matching changelog heading; reruns the network-free test suites; builds portable
+Windows and universal macOS ZIPs; verifies both; and publishes them with
+`SHA256SUMS.txt`. Release creation has the only `contents: write` permission.
+
+The macOS bundle is ad-hoc signed, not Developer ID signed or notarized.
+Signing/notarization credentials and future Authenticode certificates belong
+only in protected CI secrets after a reviewed production signing design is in
+place.

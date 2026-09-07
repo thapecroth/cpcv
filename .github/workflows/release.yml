@@ -1,0 +1,204 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - id: release
+        name: Validate tag, version, changelog, and ancestry
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$TAG" =~ $semver ]] || {
+            echo 'Release tags must be stable SemVer tags such as v0.3.0.' >&2
+            exit 1
+          }
+
+          [[ "$(git cat-file -t "refs/tags/$TAG")" == 'tag' ]] || {
+            echo 'Release tags must be annotated tags.' >&2
+            exit 1
+          }
+
+          version="$(tr -d '\r\n' < VERSION)"
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo 'VERSION must contain stable SemVer.' >&2
+            exit 1
+          }
+          [[ "$TAG" == "v$version" ]] || {
+            echo "Tag $TAG does not match VERSION $version." >&2
+            exit 1
+          }
+          grep -Fq "private let cpcvVersion = \"$version\"" macos/cpcv-macos.swift || {
+            echo 'macOS source version does not match VERSION.' >&2
+            exit 1
+          }
+          awk -v tag="$TAG" 'index($0, "## " tag) == 1 { found = 1 } END { exit !found }' CHANGELOG.md || {
+            echo "CHANGELOG.md needs a section headed $TAG before tagging." >&2
+            exit 1
+          }
+
+          git fetch --no-tags --force origin '+refs/heads/main:refs/remotes/origin/main'
+          commit="$(git rev-list -n 1 "refs/tags/$TAG")"
+          git merge-base --is-ancestor "$commit" origin/main || {
+            echo 'Release tags must point to a commit reachable from main.' >&2
+            exit 1
+          }
+
+          {
+            printf 'tag=%s\n' "$TAG"
+            printf 'version=%s\n' "$version"
+          } >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    name: Build Windows bundle
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Run Windows tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tests\test-process-timeout.ps1
+          .\tests\test-windows-e2e.ps1
+          .\tests\test-tray.ps1
+          .\tests\test-installer-ownership.ps1
+
+      - name: Build portable Windows bundle
+        shell: powershell
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\build-windows.ps1 -OutputDirectory .\dist -ReleaseTag $env:TAG
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-windows
+          path: dist/cpcv-${{ needs.validate.outputs.tag }}-windows.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  build-macos:
+    name: Build macOS universal bundle
+    needs: validate
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Run network-free macOS tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash macos/test-macos.sh
+          bash tests/test-tmux-cpcv.sh
+
+      - name: Build universal macOS bundle
+        shell: bash
+        env:
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          bash macos/build-macos.sh --output-directory dist --release-tag "$TAG"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-macos
+          path: dist/cpcv-${{ needs.validate.outputs.tag }}-macos-universal.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: Publish GitHub Release
+    needs: [validate, build-windows, build-macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-windows
+          path: dist
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-macos
+          path: dist
+
+      - name: Verify assets and publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          assets=(
+            "cpcv-${TAG}-windows.zip"
+            "cpcv-${TAG}-macos-universal.zip"
+          )
+          for asset in "${assets[@]}"; do
+            [[ -f "dist/$asset" && ! -L "dist/$asset" ]] || {
+              echo "Missing release asset: $asset" >&2
+              exit 1
+            }
+            unzip -tqq "dist/$asset"
+          done
+          (
+            cd dist
+            LC_ALL=C sha256sum "${assets[@]}" > SHA256SUMS.txt
+            sha256sum --check --strict SHA256SUMS.txt
+          )
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A release already exists for $TAG; refusing to replace it." >&2
+            exit 1
+          fi
+
+          gh release create "$TAG" \
+            "dist/${assets[0]}" \
+            "dist/${assets[1]}" \
+            dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "cpcv $TAG" \
+            --generate-notes \
+            --notes 'Portable release assets: Windows is a transparent PowerShell bundle; macOS includes ad-hoc-signed universal binaries. Verify the asset with SHA256SUMS.txt before installing. The macOS asset is not Developer ID signed or notarized and may require an explicit Gatekeeper approval.'

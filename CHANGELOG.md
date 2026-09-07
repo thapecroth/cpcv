@@ -7,6 +7,8 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.3.0 - 2026-09-07
+
 ### Added
 
 - Generic OpenSSH target configuration with private, local-only settings.
@@ -29,12 +31,18 @@ fixes increment the patch version.
 - macOS CI checks that compile the native source and exercise the network-free
   process-timeout self-test.
 - Documentation, community templates, and a Windows CI baseline.
+- A tag-triggered GitHub Actions release workflow that validates SemVer metadata,
+  rebuilds both platforms, generates SHA-256 checksums, and publishes portable
+  Windows and universal macOS assets.
+- A tracked `VERSION` file and portable macOS release bundle with prebuilt
+  arm64/x86_64 binaries for users who do not have Xcode Command Line Tools.
+- A Windows tray upload-age indicator that confirms the latest successful image
+  upload in the private hover text, menu, and dashboard.
 
 ### Changed
 
-- Installation, contribution, and release guidance now assume a private source
-  repository and never require publication, public downloads, or a hosted
-  service.
+- Installation and release guidance now support public, checksum-verified
+  portable downloads without adding a hosted service or auto-update endpoint.
 - The tray is documented as a bounded/redacted local control client rather than
   a second uploader.
 - The Windows status experience is now a modern dashboard with a clear health
@@ -43,8 +51,8 @@ fixes increment the patch version.
 
 ### Fixed
 
-- Platform documentation distinguishes source-installed unsigned clients from
-  future signed/notarized binary releases.
+- Platform documentation distinguishes ad-hoc-signed, non-notarized portable
+  macOS bundles from future Developer ID signed and notarized releases.
 - macOS command timeouts now create the SSH/SCP process group before exec,
   bound reader cleanup, and exercise timeout/output/redaction paths in CI.
 - Per-user installers refuse to replace, unload, or remove same-named local
@@ -61,8 +69,9 @@ fixes increment the patch version.
 ## Release process
 
 Before a release, update the **Unreleased** section with concise user impact,
-move it to a dated `vX.Y.Z` heading, run the documented tests, and ensure CI is
-green. Tag the verified commit as `vX.Y.Z`, then create a GitHub release whose
-notes link to this changelog and call out upgrades, configuration changes, and
-known limitations. Do not include host names, local paths, screenshots, logs,
-or credentials in release notes.
+move it to a dated `vX.Y.Z` heading, set `VERSION`, run the documented tests,
+and ensure CI is green. Create and push an annotated `vX.Y.Z` tag from a commit
+reachable from `main`; the release workflow validates the tag, version, source,
+and changelog before it builds and publishes both assets plus `SHA256SUMS.txt`.
+Do not include host names, local paths, screenshots, logs, or credentials in
+release notes.

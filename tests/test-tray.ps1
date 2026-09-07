@@ -106,8 +106,11 @@ try {
     $healthy = Get-CpcvTrayState
     Assert-CpcvTray ($healthy.Level -eq "Healthy") "A matching fresh heartbeat was not healthy."
     Assert-CpcvTray ($healthy.LatestPath -eq "/home/tester/clipboard-images/latest.png") "Tray did not read the validated latest path."
+    Assert-CpcvTray ($null -ne $healthy.LatestUploadAt -and $null -ne $healthy.LatestUploadAgeSeconds -and $healthy.LatestUploadAgeSeconds -lt 5) "Tray did not derive a fresh successful-upload time from its validated state file."
+    Assert-CpcvTray ((Get-CpcvTrayLatestUploadText -State $healthy) -match '^Uploaded ') "Tray did not expose a safe latest-upload status."
     $tooltip = Get-CpcvTrayTooltip -State $healthy
     Assert-CpcvTray ($tooltip.Length -le 63) "NotifyIcon tooltip exceeded its Windows length limit."
+    Assert-CpcvTray ($tooltip -match 'uploaded') "Healthy tray tooltip did not report the latest successful upload."
     Assert-CpcvTray ($tooltip -notmatch "example-host|clipboard-images") "NotifyIcon tooltip exposed local configuration/path details."
 
     Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=0" -f (Get-Date).ToUniversalTime().AddSeconds(-121).ToString("o"))

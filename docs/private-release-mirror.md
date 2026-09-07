@@ -1,11 +1,12 @@
-# Private-first release mirroring
+# Clean source export from a private development archive
 
-This project intentionally keeps two different repositories:
+When private development history must be separated from a public release
+repository, keep two different repositories:
 
 - The runtime archive can retain private operational history and remains
   private.
-- The clean release candidate contains only reviewed source snapshots and also
-  remains private until the owner explicitly changes its visibility.
+- The clean release candidate contains only reviewed source snapshots and is
+  published only after the owner explicitly reviews and authorizes it.
 
 These repositories must never be joined. A clean candidate is not a branch of
 the runtime archive.
@@ -20,15 +21,15 @@ the runtime archive.
    cache, logs, state, diagnostics, host names, usernames, proxy URLs, keys,
    tokens, screenshots, and test output that contains realistic secrets.
 4. Confirm the clean candidate worktree is clean and that its `origin` is the
-   intended private candidate remote.
+   intended candidate remote.
 5. Copy only the approved staged files into the candidate, then inspect the
    resulting file diff and run the full safe test suite in the candidate.
 6. Create a new, generic candidate commit with a reviewed message. Do not reuse
    private commit messages or authorship metadata if it can identify a private
    machine or host.
 7. Re-scan the candidate's complete reachable history and current tree before
-   pushing it to its private remote. Tag or create a private release only after
-   that review.
+   pushing it to its release remote. Tag or create a release only after that
+   review.
 
 ## Prohibited operations
 

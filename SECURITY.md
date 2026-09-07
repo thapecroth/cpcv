@@ -30,14 +30,13 @@ helpers. The Windows and macOS trays are local control clients that do not
 expose raw SSH output, host configuration, screenshots, or credentials in
 menus, notifications, or status files.
 
-The macOS uploader is source-installed and not a signed/notarized app bundle.
-Do not describe it as a signed client or a production binary distribution.
-When binary releases are intentionally built, signing identities, notarization
-credentials, and Authenticode certificates must remain in protected CI secrets
-and never be committed.
+The macOS release bundle contains ad-hoc-signed universal executables, not a
+Developer ID signed or notarized app bundle. Do not describe it as production
+signed, and verify its published SHA-256 before installation. Apple signing
+identities, notarization credentials, and Windows Authenticode certificates
+must remain in protected CI secrets and never be committed.
 
-The runtime archive and clean release candidate have intentionally separate
-histories. Keep both private unless the owner explicitly changes visibility;
-move code only by reviewing a committed-tree export as documented in
-`docs/private-release-mirror.md`. Do not include secret material in test
-fixtures, issues, pull requests, commits, source exports, or release notes.
+Do not include secret material in test fixtures, issues, pull requests, commits,
+source exports, release assets, checksums, or release notes. If a separate
+private development archive is used, move source only through a reviewed
+committed-tree export as documented in `docs/private-release-mirror.md`.

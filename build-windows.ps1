@@ -16,6 +16,7 @@ SSH host.
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "build"),
+    [string]$ReleaseTag,
     [switch]$AllowDirty
 )
 
@@ -56,7 +57,26 @@ if (Test-Path -LiteralPath $outputDirectory -PathType Leaf) {
 }
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 
-$archivePath = Join-Path $outputDirectory ("cpcv-windows-{0}.zip" -f $revision)
+$archiveFileName = "cpcv-windows-{0}.zip" -f $revision
+if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
+    if ($ReleaseTag -notmatch '^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
+        throw "ReleaseTag must be a stable SemVer tag such as v0.3.0."
+    }
+    $versionPath = Join-Path $repository 'VERSION'
+    if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
+        throw "ReleaseTag requires the tracked VERSION file."
+    }
+    $version = [IO.File]::ReadAllText($versionPath).Trim()
+    if ($version -notmatch '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
+        throw "VERSION must contain stable SemVer."
+    }
+    if ($ReleaseTag -ne "v$version") {
+        throw "ReleaseTag '$ReleaseTag' does not match VERSION '$version'."
+    }
+    $archiveFileName = "cpcv-{0}-windows.zip" -f $ReleaseTag
+}
+
+$archivePath = Join-Path $outputDirectory $archiveFileName
 if (Test-Path -LiteralPath $archivePath) {
     throw "Refusing to overwrite an existing build artifact: $archivePath"
 }
@@ -79,7 +99,8 @@ try {
         "cpcv-windows/cpcv-tray.ps1",
         "cpcv-windows/install-autostart.ps1",
         "cpcv-windows/install-tray.ps1",
-        "cpcv-windows/cpcv.config.example.psd1"
+        "cpcv-windows/cpcv.config.example.psd1",
+        "cpcv-windows/VERSION"
     )) {
         if ($names -notcontains $required) { throw "Build archive is missing required file: $required" }
     }

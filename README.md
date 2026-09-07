@@ -15,6 +15,40 @@ cpcv is built around a small, practical tmux workflow:
 The local clipboard stays an image. cpcv never silently replaces it with a
 file path or text.
 
+## Download a release
+
+Every annotated `vX.Y.Z` tag on `main` automatically builds and publishes two
+portable ZIPs on the [Releases page](https://github.com/thapecroth/cpcv/releases),
+plus `SHA256SUMS.txt`:
+
+- `cpcv-vX.Y.Z-windows.zip` contains the readable PowerShell client, installers,
+  source, and branded assets. It is not an EXE or MSI.
+- `cpcv-vX.Y.Z-macos-universal.zip` contains source plus prebuilt arm64 and
+  x86_64 macOS 11+ binaries. They are ad-hoc signed, not Developer ID signed or
+  notarized.
+
+Download the matching ZIP and `SHA256SUMS.txt`, then compare the ZIP's SHA-256
+with the matching line before extracting it. Do not run an asset whose checksum
+does not match.
+
+On Windows, extract the ZIP, open PowerShell in the extracted `cpcv-windows`
+folder, create `%LOCALAPPDATA%\cpcv\config.psd1` from the included example, then
+run `./install-autostart.ps1` and `./install-tray.ps1`. The branded notification
+area icon starts immediately and at sign-in; its hover text, menu, and dashboard
+show the latest successful upload age without exposing your SSH host or path.
+
+On macOS, extract the universal ZIP, enter its `cpcv` folder, and run:
+
+```bash
+bash macos/install-macos.sh --prebuilt
+bash macos/install-tray.sh --prebuilt
+```
+
+The macOS bundle does not need Xcode Command Line Tools, but macOS may require
+you to explicitly approve the verified, non-notarized binaries in Gatekeeper.
+The installers still require macOS 11+ and a logged-in graphical desktop
+session.
+
 ## Start here: tmux path paste
 
 The remote plugin is the primary way to use cpcv. It uses a pane-specific,
@@ -23,7 +57,8 @@ the key. It does not use or alter the host clipboard.
 
 ### macOS
 
-First install the uploader and its menu-bar app. The menu-bar **Settings…**
+For a source checkout, first install the uploader and its menu-bar app. The
+menu-bar **Settings…**
 screen lets you choose the SSH target, remote folder, optional remote home, and
 upload interval without editing JSON.
 
@@ -75,6 +110,7 @@ notepad (Join-Path $configDir 'config.psd1')
 # Set HostAlias, then verify normal SSH works.
 ssh image-box true
 .\install-autostart.ps1 -DeployRemoteHelpers
+.\install-tray.ps1
 ```
 
 Add the printed `run-shell` line to the remote tmux configuration, then load it
@@ -242,12 +278,15 @@ before enabling it.
 
 ## Update or remove
 
-After updating a macOS checkout, rebuild both local pieces:
+After updating a macOS source checkout, rebuild both local pieces:
 
 ```bash
 bash macos/install-macos.sh
 bash macos/install-tray.sh
 ```
+
+For an extracted macOS release bundle, use the `--prebuilt` commands shown in
+[Download a release](#download-a-release) instead.
 
 After updating the remote plugin source, redeploy it and reload the active tmux
 server:
@@ -278,8 +317,7 @@ bash tests/test-tmux-cpcv.sh
 ```
 
 Windows tests are documented in [docs/testing-and-ci.md](docs/testing-and-ci.md).
-For security, releases, and private-fork guidance, see [SECURITY.md](SECURITY.md),
-[CONTRIBUTING.md](CONTRIBUTING.md), and
-[docs/private-release-mirror.md](docs/private-release-mirror.md).
+For security and release guidance, see [SECURITY.md](SECURITY.md),
+[CONTRIBUTING.md](CONTRIBUTING.md), and [docs/platforms.md](docs/platforms.md).
 
 cpcv is licensed under the [MIT License](LICENSE).

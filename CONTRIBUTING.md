@@ -36,9 +36,9 @@ Thanks for considering a contribution.
 - Treat changes to autostart, tray controls, status schema, local IPC, file
   permissions, or macOS packaging as security-relevant and document them in
   `docs/platforms.md` and `docs/testing-and-ci.md`.
-- Keep the repository private unless the owner explicitly changes its
-  visibility. Do not add repository-specific public URLs, public download links,
-  auto-update endpoints, or instructions that assume publication.
+- Do not add auto-update endpoints or silently fetch or execute remote code.
+  Release downloads must remain explicit, versioned, checksum-verifiable, and
+  free of host-specific configuration.
 
 ## Test before opening a pull request
 
@@ -76,9 +76,10 @@ For a tray or platform change, also test these adversarial cases:
 - installation and uninstall are idempotent, per-user, and preserve data unless
   an explicit reviewed purge is requested.
 
-For macOS changes, preserve the source-installed boundary: use only the
-current user's GUI LaunchAgent, keep the Swift build local, and run
-`bash macos/test-macos.sh` on macOS before claiming a native change works.
+For macOS changes, preserve the per-user LaunchAgent boundary, keep the Swift
+source build working, preserve the validated `--prebuilt` release-bundle path,
+and run `bash macos/test-macos.sh` on macOS before claiming a native change
+works.
 
 ## Pull requests
 
@@ -89,14 +90,14 @@ URLs, or unredacted logs in an issue, pull request, or review.
 
 ## Releases
 
-Maintain `CHANGELOG.md` using Semantic Versioning. The maintainer should update
-the Unreleased section, run the documented tests, verify CI, tag the verified
-commit as `vX.Y.Z`, and create concise private release notes only when the owner
-authorizes it. Releases must not contain private host details, local paths,
-screenshots, logs, or credentials.
+Maintain `CHANGELOG.md` and `VERSION` using stable Semantic Versioning. The
+maintainer should update the Unreleased section, run the documented tests,
+verify CI, then create and push an annotated `vX.Y.Z` tag from `main`. The
+release workflow validates the metadata, rebuilds both bundles, generates
+`SHA256SUMS.txt`, and publishes the GitHub Release. Releases must not contain
+private host details, local paths, screenshots, logs, or credentials.
 
-The runtime archive and the clean release candidate intentionally have separate
-histories. Move code between them only through a reviewed committed-tree export;
-never merge, rebase, cherry-pick, or push archive refs into the candidate. Run
-the candidate's complete history/tree scan and tests before its private push.
-Follow [docs/private-release-mirror.md](docs/private-release-mirror.md).
+Do not modify an existing release or retag a published version. Use a new patch
+version for a correction. If a separate private development archive is used,
+follow [docs/private-release-mirror.md](docs/private-release-mirror.md) to
+export only reviewed committed source.

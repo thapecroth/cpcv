@@ -25,9 +25,20 @@ esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
 source_file="$script_dir/cpcv-macos.swift"
 tray_source="$script_dir/cpcv-tray.swift"
+version_file="$script_dir/../VERSION"
 
 [[ -f "$source_file" && ! -L "$source_file" ]] || die "Missing native source: $source_file"
 [[ -f "$tray_source" && ! -L "$tray_source" ]] || die "Missing tray source: $tray_source"
+[[ -f "$version_file" && ! -L "$version_file" ]] || die 'Missing VERSION file.'
+release_version=$(tr -d '\r\n' < "$version_file")
+[[ "$release_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
+  die 'VERSION is not stable SemVer.'
+/usr/bin/grep -Fq "private let cpcvVersion = \"$release_version\"" "$source_file" || \
+  die 'VERSION does not match the native macOS source version.'
+/bin/bash "$script_dir/install-macos.sh" --help | /usr/bin/grep -Fq -- '--prebuilt' || \
+  die 'macOS installer does not document the prebuilt release path.'
+/bin/bash "$script_dir/install-tray.sh" --help | /usr/bin/grep -Fq -- '--prebuilt' || \
+  die 'macOS tray installer does not document the prebuilt release path.'
 
 for shell_script in "$script_dir"/*.sh; do
   [[ -f "$shell_script" ]] || continue

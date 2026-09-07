@@ -158,7 +158,23 @@ function Get-CpcvTrayState {
         $detail = $heartbeatInfo.Status
     }
 
+    # The path state file is written atomically only after a successful upload.
+    # Its timestamp gives the tray a privacy-preserving answer to the practical
+    # question "did my most recent image upload?" without putting a remote path
+    # or host name in the notification area.
     $latestPath = Get-CpcvTrayLatestPath -Config $cfg
+    $latestUploadAt = $null
+    $latestUploadAgeSeconds = $null
+    if (-not [string]::IsNullOrWhiteSpace($latestPath)) {
+        try {
+            $latestFile = Get-Item -LiteralPath $cfg.LastRemotePathFile -Force -ErrorAction Stop
+            if (-not $latestFile.PSIsContainer -and (($latestFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)) {
+                $latestUploadAt = [DateTimeOffset]::new($latestFile.LastWriteTimeUtc)
+                $latestUploadAgeSeconds = [Math]::Max(0, ((Get-Date).ToUniversalTime() - $latestUploadAt.UtcDateTime).TotalSeconds)
+            }
+        }
+        catch { }
+    }
     return [pscustomobject]@{
         Level = $level
         Summary = $summary
@@ -171,6 +187,8 @@ function Get-CpcvTrayState {
         Heartbeat = $heartbeatInfo
         HeartbeatAgeSeconds = $heartbeatAgeSeconds
         LatestPath = $latestPath
+        LatestUploadAt = $latestUploadAt
+        LatestUploadAgeSeconds = $latestUploadAgeSeconds
     }
 }
 
@@ -178,7 +196,13 @@ function Get-CpcvTrayTooltip {
     param([Parameter(Mandatory)]$State)
     # NotifyIcon accepts at most 63 characters.  Do not put hosts, paths, or
     # log details in a system-wide hover tooltip.
-    $text = "cpcv: $($State.Level) - $(ConvertTo-CpcvTrayDisplayText -Text $State.Summary -MaximumLength 42)"
+    $latestUpload = Get-CpcvTrayLatestUploadText -State $State
+    if ($State.Level -eq "Healthy" -and $latestUpload -match '^Uploaded ') {
+        $text = "cpcv: Healthy - $latestUpload"
+    }
+    else {
+        $text = "cpcv: $($State.Level) - $(ConvertTo-CpcvTrayDisplayText -Text $State.Summary -MaximumLength 42)"
+    }
     if ($text.Length -gt 63) { return $text.Substring(0, 60) + "..." }
     return $text
 }
@@ -224,6 +248,18 @@ function Get-CpcvTrayRelativeTimeText {
     if ($hours -lt 24) { return "${hours} hr ago" }
     $days = [Math]::Floor($hours / 24)
     return "${days} day$($(if ($days -eq 1) { '' } else { 's' })) ago"
+}
+
+function Get-CpcvTrayLatestUploadText {
+    param([Parameter(Mandatory)]$State)
+
+    # Keep this label path-free: the remote path may reveal a user name or
+    # project layout, while the timestamp is enough to confirm upload progress.
+    if ([string]::IsNullOrWhiteSpace($State.LatestPath) -or -not (Test-CpcvRemotePath $State.LatestPath)) {
+        return "No upload yet"
+    }
+    if ($null -eq $State.LatestUploadAgeSeconds) { return "Uploaded (time unknown)" }
+    return "Uploaded $((Get-CpcvTrayRelativeTimeText -AgeSeconds $State.LatestUploadAgeSeconds).ToLowerInvariant())"
 }
 
 function Get-CpcvTrayGuidance {
@@ -817,7 +853,7 @@ function Show-CpcvTrayStatusWindow {
         $heartbeatCard.Value.Text = Get-CpcvTrayRelativeTimeText -AgeSeconds $CurrentState.HeartbeatAgeSeconds
         $heartbeatCard.Detail.Text = if ($CurrentState.Heartbeat) { "Watcher: $($CurrentState.Heartbeat.Status)" } else { "No valid health record" }
         $hasLatestPath = (-not [string]::IsNullOrWhiteSpace($CurrentState.LatestPath) -and (Test-CpcvRemotePath $CurrentState.LatestPath))
-        $latestCard.Value.Text = if ($hasLatestPath) { "Ready to copy" } else { "No upload yet" }
+        $latestCard.Value.Text = Get-CpcvTrayLatestUploadText -State $CurrentState
         $latestCard.Detail.Text = if ($hasLatestPath) { "Latest path is available locally" } else { "Upload an image to create one" }
 
         $uploadButton.Enabled = $CurrentState.Level -ne "Error"
@@ -932,7 +968,13 @@ function Start-CpcvTrayApplication {
         $refreshUi = {
             $script:CpcvTrayState = Get-CpcvTrayState
             $state = $script:CpcvTrayState
-            $statusItem.Text = "Status: $($state.Level) - $($state.Summary)"
+            $latestUpload = Get-CpcvTrayLatestUploadText -State $state
+            $statusItem.Text = if ($state.Level -eq "Healthy" -and $latestUpload -match '^Uploaded ') {
+                "Status: Healthy - $latestUpload"
+            }
+            else {
+                "Status: $($state.Level) - $($state.Summary)"
+            }
             $notify.Text = Get-CpcvTrayTooltip -State $state
             $isRunning = ((@($state.Guardians)).Count -gt 0 -or (@($state.Watchers)).Count -gt 0)
             $startItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and -not $isRunning)
