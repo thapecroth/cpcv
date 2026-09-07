@@ -24,7 +24,13 @@ cat > "$bin/tmux" <<'TMUX'
 set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
 case "${1:-}" in
-  show-options) printf '%s' "${FAKE_TMUX_IMAGE_DIR:-}" ;;
+  show-options)
+    case "$*" in
+      *'@imgpaste-image-dir') printf '%s' "${FAKE_TMUX_IMAGE_DIR:-}" ;;
+      *'@imgpaste-paste-key') printf '%s' "${FAKE_TMUX_PASTE_KEY:-}" ;;
+      *'@imgpaste-status') printf '%s' "${FAKE_TMUX_STATUS:-}" ;;
+    esac
+    ;;
   list-keys) if [[ -n "${FAKE_TMUX_BINDING:-}" ]]; then printf '%s\n' "$FAKE_TMUX_BINDING"; fi ;;
 esac
 TMUX
@@ -39,6 +45,11 @@ grep -Fq "paste-buffer -d -p -b imgpaste-42-" "$log" || die 'paste helper did no
 grep -Fq -- "-t %42" "$log" || die 'paste helper did not target the originating pane'
 ! grep -Fq 'set-clipboard' "$log" || die 'paste helper changed the system clipboard'
 
+modified=$(stat -c %Y "$home/clipboard-images/latest.png" 2>/dev/null || stat -f %m "$home/clipboard-images/latest.png")
+status=$(PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" IMGPASTE_TMUX_CONFIG="$config" \
+  IMGPASTE_TMUX_NOW="$((modified + 2))" "$root/tmux/scripts/imgpaste-tmux-status.sh")
+[[ "$status" == 'imgpaste · 2 sec ago' ]] || die 'status helper did not render a readable image age'
+
 : > "$log"
 PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" IMGPASTE_DIR="$home/clipboard-images" TMUX_PANE=%77 \
   bash "$root/imgpaste-latest.sh"
@@ -48,8 +59,21 @@ grep -Fq -- "-t %77" "$log" || die 'compatibility helper did not use TMUX_PANE'
 PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" \
   bash "$root/imgpaste.tmux"
 grep -Fq 'bind-key -n -T root C-v run-shell -b' "$log" || die 'plugin did not install the capture binding'
+grep -Fq 'set-option -g status-right' "$log" || die 'plugin did not add the status segment'
+grep -Fq 'IMGPASTE_TMUX_STATUS=1' "$log" || die 'plugin status segment is not owned'
+grep -Fq 'set-option -g status-interval 2' "$log" || die 'plugin did not set its default status refresh'
 ! grep -Fq 'bind-key -T prefix I run-shell -b' "$log" || die 'plugin overwrote the common TPM installer binding'
 ! grep -Fq 'unbind-key' "$root/imgpaste.tmux" || die 'plugin removes user bindings while changing keys'
+
+: > "$log"
+PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" FAKE_TMUX_PASTE_KEY=M-v \
+  bash "$root/imgpaste.tmux"
+grep -Fq 'bind-key -n -T root M-v run-shell -b' "$log" || die 'plugin did not honor a configured capture key'
+
+: > "$log"
+PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" FAKE_TMUX_STATUS=off \
+  bash "$root/imgpaste.tmux"
+! grep -Fq 'set-option -g status-right' "$log" || die 'plugin added a disabled status segment'
 
 : > "$log"
 PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" \
@@ -62,9 +86,12 @@ PATH="$bin:$PATH" FAKE_TMUX_LOG="$log" HOME="$home" \
 
 cp "$root/imgpaste.tmux" "$stage/imgpaste.tmux"
 cp "$root/tmux/scripts/imgpaste-tmux-paste.sh" "$stage/imgpaste-tmux-paste.sh"
+cp "$root/tmux/scripts/imgpaste-tmux-common.sh" "$stage/imgpaste-tmux-common.sh"
+cp "$root/tmux/scripts/imgpaste-tmux-status.sh" "$stage/imgpaste-tmux-status.sh"
 HOME="$home" IMGPASTE_STAGE_DIR="$stage" bash "$root/remote/install-tmux-imgpaste-plugin.sh" --remote-dir clipboard-images >/dev/null
 installed="$home/.local/lib/imgpaste/tmux"
-[[ -x "$installed/imgpaste.tmux" && -x "$installed/tmux/scripts/imgpaste-tmux-paste.sh" ]] || \
+[[ -x "$installed/imgpaste.tmux" && -x "$installed/tmux/scripts/imgpaste-tmux-paste.sh" && \
+   -x "$installed/tmux/scripts/imgpaste-tmux-common.sh" && -x "$installed/tmux/scripts/imgpaste-tmux-status.sh" ]] || \
   die 'installer did not install executable plugin files'
 grep -Fqx '# Managed by imgpaste tmux plugin' "$home/.config/imgpaste/tmux-paste.conf" || \
   die 'installer did not write owned configuration'

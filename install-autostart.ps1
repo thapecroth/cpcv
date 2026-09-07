@@ -122,6 +122,8 @@ function Install-ImgPasteRemoteHelpers {
         "wl-paste-shim.sh",
         "imgpaste.tmux",
         "tmux\scripts\imgpaste-tmux-paste.sh",
+        "tmux\scripts\imgpaste-tmux-common.sh",
+        "tmux\scripts\imgpaste-tmux-status.sh",
         "remote\install-tmux-imgpaste-plugin.sh"
     ) | ForEach-Object { Join-Path $share $_ }
     foreach ($file in $files) { if (-not (Test-Path $file)) { throw "Missing helper: $file" } }

@@ -87,6 +87,9 @@ done
   die 'Watcher does not exit when its guardian exits.'
 /usr/bin/grep -Fq '/bin/sleep 1' "$script_dir/install-macos.sh" || \
   die 'Installer does not wait for a replaced guardian to exit.'
+/usr/bin/grep -Fq 'bootstrapped=0' "$script_dir/install-tray.sh" && \
+  /usr/bin/grep -Fq 'launchctl kickstart -k "$domain/$label"' "$script_dir/install-tray.sh" || \
+  die 'Tray installer does not retry and confirm its LaunchAgent startup.'
 for plist_template in "$script_dir/io.imgpaste.guardian.plist.template" "$script_dir/io.imgpaste.tray.plist.template"; do
   /usr/bin/plutil -lint "$plist_template" >/dev/null || die "Invalid LaunchAgent plist: $plist_template"
   template_path=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PATH' "$plist_template" 2>/dev/null || true)

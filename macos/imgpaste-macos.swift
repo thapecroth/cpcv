@@ -1088,6 +1088,31 @@ private func finalDoctorReport(checks: [DoctorCheck], repairs: [String]) -> Doct
                         summary: summary, checks: checks, repairs: repairs)
 }
 
+private func clockSynchronizationCheck(remoteEpoch: TimeInterval, startedAt: Date, finishedAt: Date) -> DoctorCheck {
+    let duration = max(0, finishedAt.timeIntervalSince(startedAt))
+    let midpoint = (startedAt.timeIntervalSince1970 + finishedAt.timeIntervalSince1970) / 2
+    let estimatedDrift = max(0, abs(remoteEpoch - midpoint) - duration / 2 - 1)
+    let seconds = Int(estimatedDrift.rounded())
+    if estimatedDrift <= 5 {
+        return DoctorCheck(id: "clock-sync", status: "pass", message: "Host and SSH target clocks are within \(seconds) seconds.")
+    }
+    return DoctorCheck(id: "clock-sync", status: "failed", message: "Host and SSH target clocks differ by about \(seconds) seconds. Enable automatic time synchronization on the target.")
+}
+
+private func checkClockSynchronization(_ config: Config, checks: inout [DoctorCheck]) {
+    let startedAt = Date()
+    let result = runProcess(executable: "/usr/bin/ssh", arguments: sshOptions + [config.hostAlias, "LC_ALL=C date +%s"],
+                            timeoutSeconds: config.commandTimeoutSeconds, outputLimit: 256)
+    let finishedAt = Date()
+    let value = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard result.ok, value.range(of: "^[0-9]{9,12}$", options: .regularExpression) != nil,
+          let remoteEpoch = TimeInterval(value) else {
+        checks.append(DoctorCheck(id: "clock-sync", status: "skipped", message: "Clock synchronization could not be verified."))
+        return
+    }
+    checks.append(clockSynchronizationCheck(remoteEpoch: remoteEpoch, startedAt: startedAt, finishedAt: finishedAt))
+}
+
 private func localWatcherHealthy(_ config: Config, notBefore: Date? = nil) -> Bool {
     guard let status = decodeStatus(config.statusFile),
           let pid = pid_t(exactly: status.pid),
@@ -1189,7 +1214,8 @@ private func remoteBridgeDetectionCommand(remoteDir: String) -> String {
     printf '%s' "$display" | grep -Eq '^:[0-9]+$' || { printf 'partial'; exit 23; }
     match=0
     [ "$image_dir" = "$HOME/\(remoteDir)" ] && match=1
-    [ "$authority" = "$HOME/"* ] && [ -f "$authority" ] && [ ! -L "$authority" ] || { printf 'partial'; exit 24; }
+    case "$authority" in "$HOME/"*) ;; *) printf 'partial'; exit 24 ;; esac
+    [ -f "$authority" ] && [ ! -L "$authority" ] || { printf 'partial'; exit 24; }
     z=0
     grep -Fqx '# >>> imgpaste Codex X11 >>>' "$HOME/.zshrc" 2>/dev/null && z=1
     printf 'managed|%s|%s|%s' "$display" "$z" "$match"
@@ -1322,10 +1348,12 @@ private func runDoctor() -> Int32 {
     if !ssh.ok {
         let message = ssh.timedOut ? "The SSH server did not respond in time." : "The SSH server is unreachable or authentication failed."
         checks.append(DoctorCheck(id: "ssh", status: "failed", message: message))
+        checks.append(DoctorCheck(id: "clock-sync", status: "skipped", message: "Clock synchronization could not be checked because SSH is unavailable."))
         checks.append(DoctorCheck(id: "remote-directory", status: "skipped", message: "The upload directory could not be checked."))
         checks.append(DoctorCheck(id: "codex-bridge", status: "skipped", message: "The Codex image bridge could not be checked."))
     } else {
         checks.append(DoctorCheck(id: "ssh", status: "pass", message: "The SSH server is reachable."))
+        checkClockSynchronization(config, checks: &checks)
         let remoteDir = config.remoteDir.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let directoryCommand = """
         set -eu
@@ -1465,10 +1493,19 @@ private func runSelfTest() -> Int32 {
     let passCheck = DoctorCheck(id: "ssh", status: "pass", message: "ready")
     let repairedCheck = DoctorCheck(id: "local-service", status: "repaired", message: "restored")
     let failedCheck = DoctorCheck(id: "ssh", status: "failed", message: "unreachable")
+    let clockStart = Date(timeIntervalSince1970: 10_000)
+    let synchronizedClock = clockSynchronizationCheck(remoteEpoch: 10_000, startedAt: clockStart,
+                                                      finishedAt: clockStart.addingTimeInterval(0.2))
+    let skewedClock = clockSynchronizationCheck(remoteEpoch: 10_020, startedAt: clockStart,
+                                                finishedAt: clockStart.addingTimeInterval(0.2))
+    let bridgeDetection = remoteBridgeDetectionCommand(remoteDir: "clipboard-images")
     guard finalDoctorReport(checks: [passCheck], repairs: []).overall == "healthy",
           finalDoctorReport(checks: [passCheck, repairedCheck], repairs: ["local-service-started"]).overall == "repaired",
           finalDoctorReport(checks: [passCheck, failedCheck], repairs: []).overall == "needs-attention",
-          finalDoctorReport(checks: [passCheck, failedCheck], repairs: []).summary == "unreachable" else {
+          finalDoctorReport(checks: [passCheck, failedCheck], repairs: []).summary == "unreachable",
+          synchronizedClock.status == "pass", skewedClock.status == "failed",
+          bridgeDetection.contains("case \"$authority\" in \"$HOME/\"*"),
+          !bridgeDetection.contains("[ \"$authority\" = \"$HOME/\"* ]") else {
         fputs("self-test doctor report failed\n", stderr)
         return 1
     }

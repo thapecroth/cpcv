@@ -192,6 +192,31 @@ private func relativeUpload(_ value: String?, now: Date) -> String? {
     return "\(seconds / 86_400)d ago"
 }
 
+private func recentActivityMessage(status: ImgPasteStatus?, diagnosticText: String,
+                                   diagnosticReadFailed: Bool, now: Date = Date()) -> String {
+    var lines: [String] = []
+    if let success = status?.lastSuccessAt {
+        lines.append("Last successful upload: \(relativeUpload(success, now: now) ?? success)")
+    } else {
+        lines.append("No successful upload has been recorded yet.")
+    }
+    if let latest = status?.latestPath ?? status?.lastRemotePath {
+        lines.append("Latest remote image: \(redactForDisplay(latest, limit: 360))")
+    }
+    if let error = status?.lastError, !error.isEmpty {
+        lines.append("Last error: \(friendlyError(error))")
+    }
+    let diagnostic = diagnosticText.trimmingCharacters(in: .whitespacesAndNewlines)
+    if diagnosticReadFailed {
+        lines.append("The diagnostic log could not be read. The upload summary above is still current.")
+    } else if diagnostic.isEmpty {
+        lines.append("No diagnostic log entries. That is normal while uploads are working.")
+    } else {
+        lines.append("Diagnostic activity:\n\(redactForDisplay(diagnostic, limit: 2_500))")
+    }
+    return lines.joined(separator: "\n\n")
+}
+
 private func trayPresentation(state rawState: String?, lastError: String?, lastSuccessAt: String?,
                               doctorOverall: String?, doctorSummary: String?, now: Date = Date()) -> TrayPresentation {
     let state = rawState?.lowercased() ?? "unknown"
@@ -283,10 +308,17 @@ private func runTraySelfTest() -> Int32 {
                                   doctorOverall: "needs-attention", doctorSummary: "SSH server is unreachable", now: now)
     let invalid = trayPresentation(state: "configuration-invalid", lastError: "configuration-invalid", lastSuccessAt: nil,
                                    doctorOverall: nil, doctorSummary: nil, now: now)
+    let activityStatus = ImgPasteStatus(version: "1", mode: "watch", pid: 1, updatedAt: recent, state: "healthy",
+                                        lastSuccessAt: recent, lastError: nil, activeChildPgid: nil, capabilities: nil,
+                                        latestPath: "/home/me/clipboard-images/latest.png", lastRemotePath: nil,
+                                        logFile: nil, doctorOverall: nil, doctorSummary: nil, doctorUpdatedAt: nil)
+    let activity = recentActivityMessage(status: activityStatus, diagnosticText: "", diagnosticReadFailed: false, now: now)
     guard ready.title == "Ready · Uploaded 2m ago", ready.pauseTitle == "Pause Automatic Uploads", !ready.needsAttention,
           stopped.title == "Paused", stopped.pauseTitle == "Resume Automatic Uploads",
           broken.title == "Needs attention · SSH server is unreachable", broken.doctorTitle == "Repair imgpaste…",
           invalid.pauseTitle == nil, invalid.needsAttention,
+          activity.contains("Last successful upload: 2m ago"),
+          activity.contains("No diagnostic log entries. That is normal while uploads are working."),
           refreshInterval(state: "healthy", actionInFlight: false) == 4,
           refreshInterval(state: "uploading", actionInFlight: false) == 1 else {
         fputs("tray self-test menu presentation failed\n", stderr)
@@ -716,6 +748,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "configuration": return "Settings"
         case "local-service": return "Automatic uploads"
         case "ssh": return "SSH server"
+        case "clock-sync": return "Clock synchronization"
         case "remote-directory": return "Remote folder"
         case "codex-bridge": return "Codex image paste"
         default: return "imgpaste"
@@ -811,8 +844,10 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let result = runControl(controlPath: self.controlPath, arguments: ["logs"])
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                let text = redactForDisplay(result.stdout.isEmpty ? result.stderr : result.stdout, limit: 3_500)
-                self.showAlert(title: "imgpaste recent activity", message: text.isEmpty ? "No local log entries are available." : text, style: .informational)
+                let text = result.stdout.isEmpty ? result.stderr : result.stdout
+                let message = recentActivityMessage(status: self.currentStatus, diagnosticText: text,
+                                                    diagnosticReadFailed: result.timedOut || result.exitCode != 0)
+                self.showAlert(title: "imgpaste recent activity", message: message, style: .informational)
             }
         }
     }

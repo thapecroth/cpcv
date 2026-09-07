@@ -99,10 +99,24 @@ chmod 600 "$temporary"
 if (( existing_managed_plist )) && job_loaded; then
   is_managed_plist "$plist" || die "LaunchAgent ownership changed during installation; refusing to unload $label."
   launchctl bootout "$domain/$label"
+  for _ in {1..5}; do
+    job_loaded || break
+    /bin/sleep 1
+  done
+  job_loaded && die "The existing $label job did not stop."
 fi
 mv -f -- "$temporary" "$plist"
 trap - EXIT
 
-launchctl bootstrap "$domain" "$plist"
+bootstrapped=0
+for _ in {1..5}; do
+  if launchctl bootstrap "$domain" "$plist" >/dev/null 2>&1; then
+    bootstrapped=1
+    break
+  fi
+  /bin/sleep 1
+done
+((bootstrapped == 1)) || die "Could not start $label in $domain."
+launchctl kickstart -k "$domain/$label"
 printf '%s\n' "Installed and started the optional imgpaste menu-bar companion."
 printf '%s\n' "It observes the existing uploader; it does not change SSH settings or upload data during installation."

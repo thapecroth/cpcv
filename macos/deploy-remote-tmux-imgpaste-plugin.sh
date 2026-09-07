@@ -46,8 +46,10 @@ script_dir=$(CDPATH= cd -P -- "${BASH_SOURCE[0]%/*}" && /bin/pwd -P)
 project_root=$(CDPATH= cd -P -- "$script_dir/.." && /bin/pwd -P)
 plugin="$project_root/imgpaste.tmux"
 paste="$project_root/tmux/scripts/imgpaste-tmux-paste.sh"
+common="$project_root/tmux/scripts/imgpaste-tmux-common.sh"
+status="$project_root/tmux/scripts/imgpaste-tmux-status.sh"
 installer="$project_root/remote/install-tmux-imgpaste-plugin.sh"
-[[ -f "$plugin" && ! -L "$plugin" && -f "$paste" && ! -L "$paste" && -f "$installer" && ! -L "$installer" ]] || \
+[[ -f "$plugin" && ! -L "$plugin" && -f "$paste" && ! -L "$paste" && -f "$common" && ! -L "$common" && -f "$status" && ! -L "$status" && -f "$installer" && ! -L "$installer" ]] || \
   die 'Missing tmux plugin sources.'
 
 stage=$(ssh "${ssh_options[@]}" "$host" 'umask 077; mktemp -d "${TMPDIR:-/tmp}/imgpaste-tmux.XXXXXX"') || \
@@ -58,8 +60,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-scp "${ssh_options[@]}" "$plugin" "$paste" "$installer" "$host:$stage/"
+scp "${ssh_options[@]}" "$plugin" "$paste" "$common" "$status" "$installer" "$host:$stage/"
 ssh "${ssh_options[@]}" "$host" "IMGPASTE_STAGE_DIR='$stage' /usr/bin/env bash '$stage/install-tmux-imgpaste-plugin.sh' --remote-dir '$remote_dir'"
 trap - EXIT
 cleanup
-printf 'Remote tmux plugin installed on %s. Add the printed run-shell line, reload tmux, and map Cmd-V to Ctrl-V in your terminal.\n' "$host"
+printf 'Remote tmux plugin installed on %s. Add the printed run-shell line and reload tmux; Ctrl-V triggers imgpaste in Warp.\n' "$host"

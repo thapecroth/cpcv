@@ -122,6 +122,12 @@ if ! [ -L "`$plugin" ]; then
   if owned_tmux_file "`$plugin/tmux/scripts/imgpaste-tmux-paste.sh"; then
     rm -f "`$plugin/tmux/scripts/imgpaste-tmux-paste.sh"
   fi
+  if owned_tmux_file "`$plugin/tmux/scripts/imgpaste-tmux-common.sh"; then
+    rm -f "`$plugin/tmux/scripts/imgpaste-tmux-common.sh"
+  fi
+  if owned_tmux_file "`$plugin/tmux/scripts/imgpaste-tmux-status.sh"; then
+    rm -f "`$plugin/tmux/scripts/imgpaste-tmux-status.sh"
+  fi
   rmdir "`$plugin/tmux/scripts" "`$plugin/tmux" "`$plugin" 2>/dev/null || true
 fi
 if ! [ -L "`$config_dir" ] && owned_tmux_file "`$config"; then

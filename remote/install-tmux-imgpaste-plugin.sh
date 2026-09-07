@@ -60,10 +60,16 @@ safe_remote_dir "$remote_dir" || die 'Remote directory must be a relative POSIX 
 
 source_plugin="$stage_dir/imgpaste.tmux"
 source_paste="$stage_dir/imgpaste-tmux-paste.sh"
+source_common="$stage_dir/imgpaste-tmux-common.sh"
+source_status="$stage_dir/imgpaste-tmux-status.sh"
 [[ -f "$source_plugin" && ! -L "$source_plugin" ]] || die 'Missing staged tmux plugin.'
 [[ -f "$source_paste" && ! -L "$source_paste" ]] || die 'Missing staged tmux paste helper.'
+[[ -f "$source_common" && ! -L "$source_common" ]] || die 'Missing staged tmux common helper.'
+[[ -f "$source_status" && ! -L "$source_status" ]] || die 'Missing staged tmux status helper.'
 grep -Fqx "$marker" "$source_plugin" || die 'Staged tmux plugin has no ownership marker.'
 grep -Fqx "$marker" "$source_paste" || die 'Staged tmux paste helper has no ownership marker.'
+grep -Fqx "$marker" "$source_common" || die 'Staged tmux common helper has no ownership marker.'
+grep -Fqx "$marker" "$source_status" || die 'Staged tmux status helper has no ownership marker.'
 
 config_dir="$HOME/.config/imgpaste"
 plugin_dir="$HOME/.local/lib/imgpaste/tmux"
@@ -71,6 +77,8 @@ script_dir="$plugin_dir/tmux/scripts"
 config="$config_dir/tmux-paste.conf"
 plugin="$plugin_dir/imgpaste.tmux"
 paste="$script_dir/imgpaste-tmux-paste.sh"
+common="$script_dir/imgpaste-tmux-common.sh"
+status="$script_dir/imgpaste-tmux-status.sh"
 
 for directory in "$config_dir" "$plugin_dir" "$script_dir" "$HOME/$remote_dir"; do
   [[ ! -L "$directory" ]] || die "Refusing symlinked directory: $directory"
@@ -78,7 +86,7 @@ for directory in "$config_dir" "$plugin_dir" "$script_dir" "$HOME/$remote_dir"; 
 done
 chmod 700 "$config_dir" "$plugin_dir" "$script_dir"
 
-for path in "$plugin" "$paste" "$config"; do
+for path in "$plugin" "$paste" "$common" "$status" "$config"; do
   [[ ! -L "$path" ]] || die "Refusing symlinked managed path: $path"
   if [[ -e "$path" ]]; then
     managed_file "$path" || die "Refusing to replace unrelated file: $path"
@@ -87,6 +95,8 @@ done
 
 install -m 700 "$source_plugin" "$plugin"
 install -m 700 "$source_paste" "$paste"
+install -m 700 "$source_common" "$common"
+install -m 700 "$source_status" "$status"
 write_file "$config" 600 <<EOF
 $marker
 image_dir=$HOME/$remote_dir
@@ -94,4 +104,4 @@ EOF
 
 printf 'Installed imgpaste tmux plugin files. Add this to your remote tmux config:\n'
 printf 'run-shell %s\n' "$plugin"
-printf 'Map your terminal Cmd-V shortcut to Ctrl-V to use the default capture key.\n'
+printf 'Use Ctrl-V for the default capture key; Warp cannot map Cmd-V to a raw control key.\n'

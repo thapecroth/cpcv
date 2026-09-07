@@ -132,10 +132,18 @@ block. It preserves uploaded images and the core imgpaste configuration.
 `imgpaste.tmux` inserts the configured remote `latest.png` path into the pane
 that triggered it, using a transient tmux buffer. It does not change an OS
 clipboard. Source the plugin's printed `run-shell` line in a user-owned tmux
-config. Its default capture key is `Ctrl-V`; map `Cmd-V` in your terminal to
-send that key if you want the familiar shortcut. If that key is already bound,
-imgpaste leaves it unchanged; configure `@imgpaste-paste-key` to use an unused
-tmux key before sourcing the plugin.
+config. Its default capture key is `Ctrl-V`; if that key is already bound,
+imgpaste leaves it unchanged, and `@imgpaste-paste-key` can select an unused
+tmux key before sourcing the plugin. Warp consumes `Cmd-V` and cannot map it
+to a raw control key, so use `Ctrl-V` with Warp.
+
+The plugin appends `imgpaste · 2 sec ago` to tmux's right status area. This is
+the age of `latest.png` on the target server, calculated entirely on that
+server. The first plugin load sets tmux's shared status interval to two seconds
+and later respects a user-managed interval. Set `@imgpaste-status off` to hide it or
+`@imgpaste-status-refresh 5` before sourcing the plugin to change its default
+refresh interval. The macOS Doctor checks that host and target clocks differ
+by no more than five seconds.
 
 ## Reliability and security invariants
 
