@@ -39,6 +39,8 @@ release_version=$(tr -d '\r\n' < "$version_file")
   die 'macOS installer does not document the prebuilt release path.'
 /bin/bash "$script_dir/install-tray.sh" --help | /usr/bin/grep -Fq -- '--prebuilt' || \
   die 'macOS tray installer does not document the prebuilt release path.'
+/bin/bash "$script_dir/cpcv-homebrew-setup.sh" --help | /usr/bin/grep -Fq -- 'Usage: cpcv-setup' || \
+  die 'Homebrew setup helper does not document its fixed setup path.'
 
 for shell_script in "$script_dir"/*.sh; do
   [[ -f "$shell_script" ]] || continue
@@ -48,6 +50,7 @@ for remote_script in "$script_dir/../remote"/*.sh; do
   [[ -f "$remote_script" ]] || continue
   /bin/bash -n "$remote_script"
 done
+/bin/bash "$script_dir/../tests/test-homebrew-formula.sh"
 remote_installer="$script_dir/../remote/install-codex-x11-bridge.sh"
 remote_uninstaller="$script_dir/../remote/uninstall-codex-x11-bridge.sh"
 [[ -f "$remote_installer" && ! -L "$remote_installer" ]] || die 'Missing remote bridge installer.'

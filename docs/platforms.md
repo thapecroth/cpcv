@@ -54,6 +54,12 @@ locations plus the Apple Silicon and Intel Homebrew locations, so an SSH
 `ProxyCommand` can use tools such as `cloudflared` when cpcv runs in the
 background.
 
+The `thapecroth/cpcv/cpcv` Homebrew formula installs the verified macOS release
+bundle but deliberately does not create a LaunchAgent during `brew install`.
+Run `cpcv-setup` afterward to create the same current-user uploader and
+menu-bar services. `brew upgrade thapecroth/cpcv/cpcv` should likewise be
+followed by `cpcv-setup`.
+
 Use `macos/cpcv-macos-ctl.sh` for fixed local actions only:
 
 ```text
@@ -171,12 +177,23 @@ Every platform implementation must preserve these guarantees:
 
 ## Packaging boundary
 
-GitHub Releases contain portable ZIPs and `SHA256SUMS.txt`. The Windows asset
-contains transparent PowerShell source and installers, not an EXE or MSI. The
-macOS asset contains source plus ad-hoc-signed universal `arm64` and `x86_64`
-executables. It is not a Developer ID signed, notarized application bundle, so
-Gatekeeper can require an explicit user approval after the ZIP checksum is
-verified. Do not describe the macOS asset as notarized or production-signed.
+GitHub Releases contain `SHA256SUMS.txt`, a transparent Windows PowerShell ZIP,
+a per-user Windows `Setup.exe`, and a macOS universal ZIP. The Setup EXE is an
+Inno Setup wizard installed under the current user's local app area; it does
+not request administrator privileges, preserves private cpcv data by default,
+and offers remote tmux helpers only as an opt-in task. It is not
+Authenticode-signed yet, so SmartScreen can warn about it. Verify its checksum
+before proceeding.
+
+The `thapecroth/homebrew-cpcv` tap renders a formula for the exact macOS ZIP
+and SHA-256 from each release. The formula exposes `cpcv-setup` rather than
+starting GUI services during `brew install`.
+
+The macOS asset contains source plus ad-hoc-signed universal `arm64` and
+`x86_64` executables. It is not a Developer ID signed, notarized application
+bundle, so Gatekeeper can require an explicit user approval after checksum
+verification. Do not describe the macOS asset as notarized or
+production-signed.
 
 A future production binary release needs separate Apple Developer ID and
 Windows Authenticode signing identities, protected CI secrets, notarization,

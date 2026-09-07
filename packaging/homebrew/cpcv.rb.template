@@ -1,0 +1,48 @@
+class Cpcv < Formula
+  desc "Upload copied clipboard images to an SSH target"
+  homepage "https://github.com/thapecroth/cpcv"
+  url "https://github.com/thapecroth/cpcv/releases/download/v__VERSION__/cpcv-v__VERSION__-macos-universal.zip"
+  sha256 "__MACOS_SHA256__"
+  license "MIT"
+
+  depends_on macos: :big_sur
+
+  def install
+    source_root = buildpath/"cpcv"
+    odie "cpcv release archive is missing its expected root directory" unless source_root.directory?
+    libexec.install source_root.children
+
+    wrappers = {
+      "cpcv" => libexec/"macos/cpcv-macos-ctl.sh",
+      "cpcv-setup" => libexec/"macos/cpcv-homebrew-setup.sh",
+      "cpcv-deploy-tmux" => libexec/"macos/deploy-remote-tmux-cpcv-plugin.sh",
+    }
+    wrappers.each do |name, target|
+      odie "cpcv release archive is missing #{target.basename}" unless target.executable?
+      (bin/name).write <<~EOS
+        #!/bin/sh
+        exec "#{target}" "$@"
+      EOS
+      chmod 0755, bin/name
+    end
+  end
+
+  def caveats
+    <<~EOS
+      Finish cpcv's per-user GUI setup (this does not use sudo):
+        cpcv-setup
+
+      Then choose the cpcv menu-bar icon > Settings to configure your SSH target.
+      To enable optional pane-specific tmux paste on that target:
+        cpcv-deploy-tmux --host image-box
+
+      The remote helper never edits ~/.tmux.conf. Add its printed run-shell line
+      yourself, then reload tmux.
+    EOS
+  end
+
+  test do
+    system "#{libexec}/macos/build/cpcv-macos", "self-test"
+    system "#{libexec}/macos/build/cpcv-tray", "self-test"
+  end
+end

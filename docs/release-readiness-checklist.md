@@ -34,6 +34,9 @@ Use this checklist before creating a public or private cpcv release.
 
 - [ ] Windows autostart/tray installation and scoped uninstallation are
       idempotent and preserve data by default.
+- [ ] The Windows Setup wizard has been exercised in a fresh standard-user
+      session and on an upgrade: it needs no elevation, preserves private data,
+      and starts exactly one owned watcher/tray pair.
 - [ ] If claiming macOS support, installation creates only the current user's
       `io.cpcv.*` jobs and never creates a root LaunchDaemon.
 - [ ] The tray status is bounded and redacted, and every control action targets
@@ -51,19 +54,24 @@ Use this checklist before creating a public or private cpcv release.
       visibility have been reviewed.
 - [ ] Candidate CI is green; the release tag is annotated, stable SemVer, and
       matches `VERSION`, the macOS source version, and its changelog heading.
-- [ ] The Windows archive was produced from a clean committed tree, contains
-      the branded assets, excludes private runtime state, and passes its safe
-      extracted-source checks.
+- [ ] The Windows archive and Setup EXE were produced from a clean committed
+      tree. The ZIP contains the branded assets and no private runtime state;
+      the EXE is a valid per-user wizard and passes its packaged-bootstrap
+      checks.
 - [ ] The macOS archive was produced from committed source plus verified
       universal arm64/x86_64 binaries, excludes private runtime state, and
       passes both native self-tests.
+- [ ] The `thapecroth/homebrew-cpcv` formula references the exact macOS release
+      ZIP and SHA-256, installs without creating GUI services, and its
+      `cpcv-setup` path has been exercised in a fresh user session.
 - [ ] `SHA256SUMS.txt` has been generated from the exact release assets and
       successfully verifies them.
 - [ ] A live SSH transfer is called successful only when run against an
       authorized host and documented separately from network-free tests.
-- [ ] The release notes accurately state that the macOS binaries are ad-hoc
-      signed but not notarized; they do not claim Developer ID or production
-      signing.
+- [ ] The release notes accurately state that the Windows Setup EXE is not
+      Authenticode-signed and may prompt SmartScreen, and that macOS binaries
+      are ad-hoc signed but not notarized; they do not claim Developer ID or
+      production signing.
 - [ ] Before claiming a production-signed binary release, add reviewed Apple
       notarization and Windows Authenticode, protected CI secrets, and
       fresh-machine verification for every supported architecture.

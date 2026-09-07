@@ -90,6 +90,13 @@ jobs:
           .\tests\test-windows-e2e.ps1
           .\tests\test-tray.ps1
           .\tests\test-installer-ownership.ps1
+          .\tests\test-windows-installer-package.ps1
+
+      - name: Compile Windows setup wizard from a clean source export
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\build-windows.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'cpcv-windows-installer-check') -IncludeInstaller
 
   test-macos:
     name: macOS native client

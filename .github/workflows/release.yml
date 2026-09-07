@@ -94,19 +94,22 @@ jobs:
           .\tests\test-windows-e2e.ps1
           .\tests\test-tray.ps1
           .\tests\test-installer-ownership.ps1
+          .\tests\test-windows-installer-package.ps1
 
-      - name: Build portable Windows bundle
+      - name: Build Windows portable bundle and setup wizard
         shell: powershell
         env:
           TAG: ${{ needs.validate.outputs.tag }}
         run: |
           $ErrorActionPreference = 'Stop'
-          .\build-windows.ps1 -OutputDirectory .\dist -ReleaseTag $env:TAG
+          .\build-windows.ps1 -OutputDirectory .\dist -ReleaseTag $env:TAG -IncludeInstaller
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-windows
-          path: dist/cpcv-${{ needs.validate.outputs.tag }}-windows.zip
+          path: |
+            dist/cpcv-${{ needs.validate.outputs.tag }}-windows.zip
+            dist/cpcv-${{ needs.validate.outputs.tag }}-windows-setup.exe
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -173,6 +176,7 @@ jobs:
 
           assets=(
             "cpcv-${TAG}-windows.zip"
+            "cpcv-${TAG}-windows-setup.exe"
             "cpcv-${TAG}-macos-universal.zip"
           )
           for asset in "${assets[@]}"; do
@@ -180,7 +184,21 @@ jobs:
               echo "Missing release asset: $asset" >&2
               exit 1
             }
-            unzip -tqq "dist/$asset"
+            case "$asset" in
+              *.zip)
+                unzip -tqq "dist/$asset"
+                ;;
+              *.exe)
+                [[ "$(head -c 2 "dist/$asset")" == 'MZ' ]] || {
+                  echo "Windows setup asset is not a PE executable: $asset" >&2
+                  exit 1
+                }
+                ;;
+              *)
+                echo "Unexpected release asset type: $asset" >&2
+                exit 1
+                ;;
+            esac
           done
           (
             cd dist
@@ -196,9 +214,77 @@ jobs:
           gh release create "$TAG" \
             "dist/${assets[0]}" \
             "dist/${assets[1]}" \
+            "dist/${assets[2]}" \
             dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "cpcv $TAG" \
             --generate-notes \
-            --notes 'Portable release assets: Windows is a transparent PowerShell bundle; macOS includes ad-hoc-signed universal binaries. Verify the asset with SHA256SUMS.txt before installing. The macOS asset is not Developer ID signed or notarized and may require an explicit Gatekeeper approval.'
+            --notes 'Release assets: Windows includes a recommended per-user Setup.exe wizard plus a transparent PowerShell ZIP; macOS includes ad-hoc-signed universal binaries. Verify every asset with SHA256SUMS.txt before installing. The Windows Setup.exe is not Authenticode-signed yet and may trigger SmartScreen. The macOS asset is not Developer ID signed or notarized and may require an explicit Gatekeeper approval.'
+
+  publish-homebrew:
+    name: Publish Homebrew formula
+    needs: [validate, build-macos, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: cpcv-homebrew-tap
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-macos
+          path: dist
+
+      - name: Render and push the Homebrew formula
+        shell: bash
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ -n "$HOMEBREW_TAP_DEPLOY_KEY" ]] || {
+            echo 'HOMEBREW_TAP_DEPLOY_KEY is required to update thapecroth/homebrew-cpcv.' >&2
+            exit 1
+          }
+
+          install -d -m 700 "$HOME/.ssh"
+          key_path="$HOME/.ssh/cpcv-homebrew-tap"
+          printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+
+          trap 'rm -f -- "$key_path"' EXIT
+          export GIT_SSH_COMMAND="ssh -i $key_path -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+          git clone --depth 1 git@github.com:thapecroth/homebrew-cpcv.git tap
+          asset="dist/cpcv-${TAG}-macos-universal.zip"
+          [[ -f "$asset" && ! -L "$asset" ]] || {
+            echo "Missing macOS release asset: $asset" >&2
+            exit 1
+          }
+          sha256=$(sha256sum "$asset" | awk '{print $1}')
+          version=${TAG#v}
+          bash packaging/homebrew/render-formula.sh \
+            --version "$version" \
+            --sha256 "$sha256" \
+            --output tap/Formula/cpcv.rb >/dev/null
+          ruby -c tap/Formula/cpcv.rb
+
+          git -C tap config user.name 'cpcv release automation'
+          git -C tap config user.email 'thapecroth@users.noreply.github.com'
+          git -C tap add Formula/cpcv.rb
+          if git -C tap diff --cached --quiet; then
+            echo 'Homebrew formula is already current.'
+            exit 0
+          fi
+          git -C tap commit -m "cpcv $TAG"
+          git -C tap push origin HEAD:main

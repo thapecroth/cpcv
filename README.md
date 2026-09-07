@@ -43,9 +43,9 @@ does not capture your screen or silently replace your clipboard with text.
 
 ## Quick start
 
-Most people should use a release bundle. It includes the installers and needs
-no source build. Use a source checkout only when you want to contribute or
-modify cpcv.
+Most people should use a release install. It needs no source build: use the
+Windows setup wizard or the macOS Homebrew formula. Transparent ZIP bundles
+remain available for people who prefer them or need an offline install.
 
 > **Before you start**
 >
@@ -55,24 +55,42 @@ modify cpcv.
 > - Replace `image-box` below with your own working SSH alias or host. Confirm
 >   it works with `ssh image-box true` before depending on cpcv.
 
-### 1. Download the right bundle
+### 1. Choose an install
 
-Get the matching ZIP and `SHA256SUMS.txt` from the
-[latest release](https://github.com/thapecroth/cpcv/releases/latest), then
-compare the ZIP's SHA-256 with its matching checksum before extracting it.
-
-| Your computer | Download | Extracted folder |
+| Your computer | Recommended | Alternative |
 | --- | --- | --- |
-| Windows 10/11 | `cpcv-vX.Y.Z-windows.zip` | `cpcv-windows` |
-| macOS 11+ (Apple Silicon or Intel) | `cpcv-vX.Y.Z-macos-universal.zip` | `cpcv` |
+| Windows 10/11 | `cpcv-vX.Y.Z-windows-setup.exe` from the [latest release](https://github.com/thapecroth/cpcv/releases/latest) | Transparent `cpcv-vX.Y.Z-windows.zip` |
+| macOS 11+ (Apple Silicon or Intel) | `brew install thapecroth/cpcv/cpcv` | `cpcv-vX.Y.Z-macos-universal.zip` from the latest release |
 
-The macOS bundle has prebuilt universal binaries, so it does not need Xcode
-Command Line Tools. They are ad-hoc signed, not notarized, so Gatekeeper can
-ask you to approve them after checksum verification.
+The release page supplies `SHA256SUMS.txt`. Verify the exact Windows EXE or
+ZIP you download before running it. The Windows setup wizard is per-user and
+does not need administrator privileges, but it is not Authenticode-signed yet;
+Windows SmartScreen can warn about it. Do not override a warning for an
+unverified download.
+
+The macOS ZIP has prebuilt universal binaries, so it does not need Xcode
+Command Line Tools. The Homebrew formula verifies that ZIP's checksum, but the
+binaries are ad-hoc signed, not Developer ID signed or notarized. Gatekeeper
+can still ask for explicit approval after verification.
 
 ### 2. Install and connect
 
-#### Windows
+#### Windows setup wizard (recommended)
+
+Download `cpcv-vX.Y.Z-windows-setup.exe`, verify its SHA-256 entry in
+`SHA256SUMS.txt`, and run it. The first setup asks for an SSH alias/host and a
+relative remote image folder; use the SSH configuration already on your
+computer for passwords, keys, and proxy rules. The optional tmux helper task is
+off by default. Existing cpcv private configuration is preserved.
+
+Setup starts the watcher and branded tray icon now and at sign-in. Confirm your
+target when it is ready:
+
+```powershell
+ssh image-box true
+```
+
+#### Windows portable ZIP (advanced)
 
 Open PowerShell in the extracted `cpcv-windows` folder and run:
 
@@ -93,7 +111,27 @@ keys, and proxy rules in your normal SSH configuration—not in `config.psd1`.
 If you only want automatic uploads and not tmux paste, omit
 `-DeployRemoteHelpers`.
 
-#### macOS
+Do not run a portable install and the setup-wizard install at the same time.
+Remove the old portable startup/tray integration before switching to Setup.
+
+#### macOS with Homebrew (recommended)
+
+```bash
+brew install thapecroth/cpcv/cpcv
+cpcv-setup
+```
+
+Homebrew installs the package only; `cpcv-setup` explicitly creates and starts
+the current-user services. Click the cpcv menu-bar icon, choose **Settings...**,
+set your SSH target to `image-box`, and save. Then verify the connection and
+install the optional tmux helper:
+
+```bash
+ssh image-box true
+cpcv-deploy-tmux --host image-box
+```
+
+#### macOS universal ZIP (alternative)
 
 Open Terminal in the extracted `cpcv` folder and run:
 
@@ -130,9 +168,10 @@ Reload an already-running tmux server:
 tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"
 ```
 
-If you skipped remote helpers on Windows, run
-`.\install-autostart.ps1 -DeployRemoteHelpers` after your SSH configuration is
-ready, then add the same `run-shell` line.
+If you skipped the optional tmux helpers in Windows Setup, run
+`& "$env:LOCALAPPDATA\Programs\cpcv\install-autostart.ps1" -DeployRemoteHelpers`
+after your SSH configuration is ready. With Homebrew, use
+`cpcv-deploy-tmux --host image-box`. Then add the same `run-shell` line.
 
 ### 4. Use it
 
@@ -207,13 +246,24 @@ reporting process.
 
 ## Update, remove, or go deeper
 
-To update, extract a newer release and rerun the same platform installer
-commands (keep `--prebuilt` for macOS release bundles). Redeploy the tmux
-helper after updating its source. To remove cpcv while preserving your private
-settings and images, run `bash macos/uninstall-tray.sh` and
-`bash macos/uninstall-macos.sh` on macOS, or preview the Windows removal with
+To update Windows, run the newer Setup EXE; it keeps private configuration and
+data by default. For a portable ZIP, extract the new release and rerun its
+installers. To update Homebrew, run `brew upgrade thapecroth/cpcv/cpcv` followed
+by `cpcv-setup`; redeploy the tmux helper after its source changes.
+
+To remove the Windows setup installation while preserving private settings and
+images, use **Installed apps** in Windows. For portable installs, preview
 `.\uninstall-tray.ps1 -WhatIf` and `.\uninstall-autostart.ps1 -WhatIf` before
-running those commands without `-WhatIf`.
+running them without `-WhatIf`. For a macOS ZIP, run
+`bash macos/uninstall-tray.sh` and `bash macos/uninstall-macos.sh` before
+discarding it. For Homebrew, stop the user services before removing the formula:
+
+```bash
+prefix="$(brew --prefix cpcv)"
+bash "$prefix/libexec/macos/uninstall-tray.sh"
+bash "$prefix/libexec/macos/uninstall-macos.sh"
+brew uninstall cpcv
+```
 
 - [Full platform guide](docs/platforms.md)
 - [Optional native Codex image paste on a Linux SSH host](docs/platforms.md#optional-native-codex-image-paste-on-linux)

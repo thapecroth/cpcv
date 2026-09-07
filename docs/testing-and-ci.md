@@ -8,7 +8,7 @@ the macOS job must not read a real system clipboard.
 
 | Area | Windows | macOS |
 | --- | --- | --- |
-| Syntax/build | Parses every PowerShell script and rejects dynamic evaluation | `swiftc` builds the native uploader and menu-bar source; Bash syntax is checked |
+| Syntax/build | Parses every PowerShell script, rejects dynamic evaluation, validates installer policy, and compiles the Inno Setup wizard from a clean export | `swiftc` builds the native uploader and menu-bar source; Bash and rendered Homebrew formula syntax are checked |
 | Process timeout | Safe simulated child-tree timeout in PowerShell | Native self-test creates a harmless local child process, forces the deadline, and verifies the child is gone |
 | Configuration | Strict numeric/path validation and local-only test configs | JSON schema/invariant checks plus native validation/redaction self-test |
 | Tray/status | Branded multi-size icon probe, bounded tooltip, and an off-screen synthetic dashboard action test | Native tray source build and fixed controller/status contract |
@@ -50,22 +50,30 @@ against temporary native stand-ins, verifies byte-for-byte upload and
 dashboard smoke test is invisible and has an in-loop deadline so CI or local
 checks cannot leave a dialog on a contributor's desktop.
 
-Build validation should also extract the archive into a path containing spaces
-and run the Windows suite there. That catches quoting regressions in local
-PowerShell launcher paths before a user installs from a normal Downloads or
-Documents folder. `macos/build-macos.sh` constructs release bundles from
-`git archive` plus universal arm64/x86_64 binaries, verifies their code
-signatures and self-tests, then checks that the ZIP excludes local state.
+Build validation also extracts the portable archive into a path containing
+spaces and runs the Windows suite there. That catches quoting regressions in
+local PowerShell launcher paths before a user installs from a normal Downloads
+or Documents folder. CI separately compiles the per-user Inno Setup wizard from
+a clean committed-tree export and checks its packaged bootstrap policy.
+`macos/build-macos.sh` constructs release bundles from `git archive` plus
+universal arm64/x86_64 binaries, verifies their code signatures and self-tests,
+then checks that the ZIP excludes local state. The macOS test entry point also
+renders a representative Homebrew formula and verifies its Ruby syntax.
 
 ## Release CI
 
 Pushing an annotated stable SemVer tag from `main` starts the release workflow.
 It validates the tag against `VERSION`, the native macOS source version, and a
-matching changelog heading; reruns the network-free test suites; builds portable
-Windows and universal macOS ZIPs; verifies both; and publishes them with
-`SHA256SUMS.txt`. Release creation has the only `contents: write` permission.
+matching changelog heading; reruns the network-free test suites; builds the
+Windows ZIP and per-user Setup EXE plus the universal macOS ZIP; verifies every
+asset; and publishes them with `SHA256SUMS.txt`. After the GitHub Release is
+published, it renders and pushes the matching formula to
+`thapecroth/homebrew-cpcv`. That step needs the repository's protected
+`HOMEBREW_TAP_DEPLOY_KEY` secret. Release creation has the only `contents:
+write` permission.
 
-The macOS bundle is ad-hoc signed, not Developer ID signed or notarized.
-Signing/notarization credentials and future Authenticode certificates belong
-only in protected CI secrets after a reviewed production signing design is in
-place.
+The Windows Setup EXE is currently not Authenticode-signed and may trigger
+SmartScreen. The macOS bundle is ad-hoc signed, not Developer ID signed or
+notarized. Signing/notarization credentials and future Authenticode
+certificates belong only in protected CI secrets after a reviewed production
+signing design is in place.

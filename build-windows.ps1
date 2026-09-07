@@ -1,23 +1,20 @@
 <#
 .SYNOPSIS
-Builds a clean, portable Windows source archive for cpcv.
+Builds clean portable and optional setup-executable Windows artifacts for cpcv.
 
 .DESCRIPTION
-The Windows runtime is intentionally transparent PowerShell rather than a
-wrapped executable. This command creates a ZIP directly from the committed
-Git tree, so it cannot accidentally include a local SSH configuration, cache,
-logs, screenshots, or other ignored workstation state.
-
-The archive is suitable for private distribution to another Windows machine
-with PowerShell and the built-in OpenSSH client. It is not an installer and
-does not change the local uploader, Startup shortcuts, clipboard, or remote
-SSH host.
+The portable archive is intentionally transparent PowerShell. With
+-IncludeInstaller, a standard Inno Setup wizard is compiled from the same clean
+Git export. Neither operation changes the local uploader, Startup shortcuts,
+clipboard, or remote SSH host.
 #>
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "build"),
     [string]$ReleaseTag,
-    [switch]$AllowDirty
+    [switch]$AllowDirty,
+    [switch]$IncludeInstaller,
+    [string]$InstallerCompiler
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +48,10 @@ if (-not $AllowDirty) {
 }
 
 $revision = (Invoke-CpcvBuildGit -Arguments @("-C", $repository, "rev-parse", "--short=12", "HEAD") | Select-Object -Last 1).Trim()
+$version = (Invoke-CpcvBuildGit -Arguments @("-C", $repository, "show", "HEAD:VERSION") | Select-Object -Last 1).Trim()
+if ($version -notmatch '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
+    throw "Committed HEAD VERSION must contain stable SemVer."
+}
 $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $outputDirectory -PathType Leaf) {
     throw "OutputDirectory is a file, not a directory: $outputDirectory"
@@ -62,18 +63,59 @@ if (-not [string]::IsNullOrWhiteSpace($ReleaseTag)) {
     if ($ReleaseTag -notmatch '^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
         throw "ReleaseTag must be a stable SemVer tag such as v0.3.0."
     }
-    $versionPath = Join-Path $repository 'VERSION'
-    if (-not (Test-Path -LiteralPath $versionPath -PathType Leaf)) {
-        throw "ReleaseTag requires the tracked VERSION file."
-    }
-    $version = [IO.File]::ReadAllText($versionPath).Trim()
-    if ($version -notmatch '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
-        throw "VERSION must contain stable SemVer."
-    }
     if ($ReleaseTag -ne "v$version") {
         throw "ReleaseTag '$ReleaseTag' does not match VERSION '$version'."
     }
     $archiveFileName = "cpcv-{0}-windows.zip" -f $ReleaseTag
+}
+
+function Resolve-CpcvInnoCompiler {
+    param([AllowEmptyString()][string]$RequestedPath)
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $candidates.Add($RequestedPath)
+    }
+    $fromPath = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($fromPath) { $candidates.Add($fromPath.Source) }
+    foreach ($programFiles in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
+        if (-not [string]::IsNullOrWhiteSpace($programFiles)) {
+            $candidates.Add((Join-Path $programFiles "Inno Setup 6\ISCC.exe"))
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+        $resolved = [IO.Path]::GetFullPath($candidate)
+        $versionText = (Get-Item -LiteralPath $resolved).VersionInfo.FileVersion
+        $versionMatch = [regex]::Match([string]$versionText, '\d+(?:\.\d+){1,3}')
+        if (-not $versionMatch.Success) {
+            throw "Cannot determine the Inno Setup compiler version at '$resolved'."
+        }
+        if ([version]$versionMatch.Value -lt [version]'6.3') {
+            throw "Inno Setup 6.3 or later is required; found $($versionMatch.Value) at '$resolved'."
+        }
+        return $resolved
+    }
+    throw "Inno Setup 6.3 or later compiler (ISCC.exe) was not found. Install Inno Setup 6.3+ or pass -InstallerCompiler."
+}
+
+function Test-CpcvExecutableHeader {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $Path
+    if ($item.Length -lt 128KB) { return $false }
+    $stream = $null
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        [byte[]]$header = [byte[]]::new(2)
+        if ($stream.Read($header, 0, $header.Length) -ne $header.Length) { return $false }
+        return ($header[0] -eq [byte][char]'M' -and $header[1] -eq [byte][char]'Z')
+    }
+    finally {
+        if ($stream) { $stream.Dispose() }
+    }
 }
 
 $archivePath = Join-Path $outputDirectory $archiveFileName
@@ -100,6 +142,8 @@ try {
         "cpcv-windows/install-autostart.ps1",
         "cpcv-windows/install-tray.ps1",
         "cpcv-windows/cpcv.config.example.psd1",
+        "cpcv-windows/windows/installer/cpcv.iss",
+        "cpcv-windows/windows/installer/cpcv-installer.ps1",
         "cpcv-windows/VERSION"
     )) {
         if ($names -notcontains $required) { throw "Build archive is missing required file: $required" }
@@ -162,10 +206,65 @@ finally {
     $zip.Dispose()
 }
 
+$installerPath = $null
+if ($IncludeInstaller) {
+    $compiler = Resolve-CpcvInnoCompiler -RequestedPath $InstallerCompiler
+    $installerBaseName = if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
+        "cpcv-windows-$revision-setup"
+    }
+    else {
+        "cpcv-$ReleaseTag-windows-setup"
+    }
+    $installerPath = Join-Path $outputDirectory "$installerBaseName.exe"
+    if (Test-Path -LiteralPath $installerPath) {
+        throw "Refusing to overwrite an existing installer artifact: $installerPath"
+    }
+
+    $stage = Join-Path $outputDirectory (".cpcv-windows-installer-stage-{0}" -f [Guid]::NewGuid().ToString('N'))
+    $stageRoot = Join-Path $stage "cpcv-windows"
+    $safeStagePrefix = ([IO.Path]::GetFullPath($outputDirectory).TrimEnd('\') + '\')
+    try {
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $stage -Force
+        if (-not (Test-Path -LiteralPath $stageRoot -PathType Container)) {
+            throw "Installer staging did not produce the expected cpcv-windows root."
+        }
+        $installerScript = Join-Path $stageRoot "windows\installer\cpcv.iss"
+        if (-not (Test-Path -LiteralPath $installerScript -PathType Leaf)) {
+            throw "Installer staging is missing windows\installer\cpcv.iss."
+        }
+
+        $compilerArguments = @(
+            "/DCpcvVersion=$version",
+            "/DCpcvSourceRoot=$stageRoot",
+            "/DCpcvOutputDir=$outputDirectory",
+            "/DCpcvOutputBaseName=$installerBaseName",
+            $installerScript
+        )
+        & $compiler @compilerArguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compiler failed with exit code $LASTEXITCODE."
+        }
+        if (-not (Test-CpcvExecutableHeader -Path $installerPath)) {
+            throw "Inno Setup did not produce a valid cpcv Setup executable: $installerPath"
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stage) {
+            $resolvedStage = [IO.Path]::GetFullPath($stage)
+            if (-not $resolvedStage.StartsWith($safeStagePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing to remove an installer staging directory outside OutputDirectory."
+            }
+            Remove-Item -LiteralPath $resolvedStage -Recurse -Force
+        }
+    }
+}
+
 $size = (Get-Item -LiteralPath $archivePath).Length
 [pscustomobject]@{
     Artifact = $archivePath
+    InstallerArtifact = $installerPath
     Revision = $revision
     Bytes = $size
-    Source = "committed Git HEAD"
+    Source = if ($IncludeInstaller) { "committed Git HEAD (portable ZIP and Inno Setup EXE)" } else { "committed Git HEAD (portable ZIP)" }
 }

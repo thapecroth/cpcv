@@ -7,6 +7,26 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.4.0 - 2026-09-07
+
+### Added
+
+- A standard per-user Windows Setup.exe wizard that preserves private cpcv
+  configuration and data, restarts only verified cpcv-owned local integrations
+  on upgrade, and ships beside the transparent portable ZIP.
+- Release automation that compiles and validates the Windows installer from a
+  clean committed tree.
+- A Homebrew formula distribution path for macOS, including a `cpcv-setup`
+  helper and release automation for the `thapecroth/homebrew-cpcv` tap.
+
+### Security
+
+- The Windows installer uses no administrator privileges, creates a new config
+  atomically, and fails closed rather than replacing an unrelated portable
+  cpcv Startup integration.
+- Windows Setup.exe remains unsigned pending Authenticode signing; macOS
+  release binaries remain ad-hoc-signed and not notarized.
+
 ## v0.3.0 - 2026-09-07
 
 ### Added

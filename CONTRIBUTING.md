@@ -39,6 +39,9 @@ Thanks for considering a contribution.
 - Do not add auto-update endpoints or silently fetch or execute remote code.
   Release downloads must remain explicit, versioned, checksum-verifiable, and
   free of host-specific configuration.
+- Keep the Windows Setup wizard per-user and optional alongside the transparent
+  ZIP. Do not claim Authenticode signing while the released Setup EXE is
+  unsigned, and do not make Homebrew installation silently create GUI services.
 
 ## Test before opening a pull request
 
@@ -46,6 +49,7 @@ Thanks for considering a contribution.
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-process-timeout.ps1
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-windows-e2e.ps1
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-tray.ps1
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\test-windows-installer-package.ps1
 ```
 
 Also parse modified PowerShell scripts:
@@ -93,9 +97,13 @@ URLs, or unredacted logs in an issue, pull request, or review.
 Maintain `CHANGELOG.md` and `VERSION` using stable Semantic Versioning. The
 maintainer should update the Unreleased section, run the documented tests,
 verify CI, then create and push an annotated `vX.Y.Z` tag from `main`. The
-release workflow validates the metadata, rebuilds both bundles, generates
-`SHA256SUMS.txt`, and publishes the GitHub Release. Releases must not contain
-private host details, local paths, screenshots, logs, or credentials.
+release workflow validates the metadata, rebuilds the Windows ZIP and per-user
+Setup EXE plus the macOS universal ZIP, generates `SHA256SUMS.txt`, and
+publishes the GitHub Release. It then updates the formula in
+`thapecroth/homebrew-cpcv` using the protected `HOMEBREW_TAP_DEPLOY_KEY` secret.
+Releases must not contain private host details, local paths, screenshots, logs,
+or credentials. Release notes must accurately state that the Windows Setup EXE
+is currently unsigned and the macOS binaries are ad-hoc signed, not notarized.
 
 Do not modify an existing release or retag a published version. Use a new patch
 version for a correction. If a separate private development archive is used,
