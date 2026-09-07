@@ -2,10 +2,10 @@
 # Remove only the optional macOS menu-bar companion for this checkout.
 set -euo pipefail
 
-readonly label='io.imgpaste.tray'
+readonly label='io.cpcv.tray'
 
 die() {
-  printf 'imgpaste tray uninstall: %s\n' "$*" >&2
+  printf 'cpcv tray uninstall: %s\n' "$*" >&2
   exit 1
 }
 
@@ -28,7 +28,7 @@ launch_agents="$home_dir/Library/LaunchAgents"
 plist="$launch_agents/$label.plist"
 if [[ -L "$plist" ]]; then die "Refusing symlinked LaunchAgent path: $plist"; fi
 is_managed_plist() {
-  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by imgpaste install-tray.sh' "$1"
+  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by cpcv install-tray.sh' "$1"
 }
 job_loaded() {
   launchctl print "$domain/$label" >/dev/null 2>&1
@@ -41,4 +41,4 @@ if job_loaded; then
   launchctl bootout "$domain/$label"
 fi
 if [[ -e "$plist" ]]; then rm -f -- "$plist"; fi
-printf '%s\n' "Removed the optional imgpaste menu-bar companion. The uploader service and its data were preserved."
+printf '%s\n' "Removed the optional cpcv menu-bar companion. The uploader service and its data were preserved."

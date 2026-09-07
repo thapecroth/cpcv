@@ -5,7 +5,7 @@ IFS=$'\n\t'
 umask 077
 
 die() {
-  printf 'imgpaste remote Codex X11 deployment: %s\n' "$*" >&2
+  printf 'cpcv remote Codex X11 deployment: %s\n' "$*" >&2
   exit 1
 }
 
@@ -49,7 +49,7 @@ while [[ "$remote_dir" == */ ]]; do remote_dir=${remote_dir%/}; done
   die 'Remote directory must be a relative POSIX path without parent traversal.'
 [[ "$display" =~ ^:[0-9]+$ ]] || die 'Display must be a local display such as :98.'
 if [[ -z "$receipt" ]]; then
-  receipt="$HOME/Library/Application Support/imgpaste/codex-x11-bridge.json"
+  receipt="$HOME/Library/Application Support/cpcv/codex-x11-bridge.json"
 fi
 [[ "$receipt" == /* && "$receipt" != *$'\n'* && "$receipt" != *$'\r'* ]] || \
   die 'Receipt must be an absolute local path.'
@@ -58,7 +58,7 @@ receipt_dir=${receipt%/*}
 
 script_dir=$(CDPATH= cd -P -- "${BASH_SOURCE[0]%/*}" && /bin/pwd -P)
 project_root=$(CDPATH= cd -P -- "$script_dir/.." && /bin/pwd -P)
-bridge="$project_root/remote/imgpaste-codex-x11-bridge.sh"
+bridge="$project_root/remote/cpcv-codex-x11-bridge.sh"
 installer="$project_root/remote/install-codex-x11-bridge.sh"
 test_script="$project_root/remote/test-codex-x11-bridge.sh"
 uninstaller="$project_root/remote/uninstall-codex-x11-bridge.sh"
@@ -66,9 +66,9 @@ uninstaller="$project_root/remote/uninstall-codex-x11-bridge.sh"
    -f "$test_script" && ! -L "$test_script" && -f "$uninstaller" && ! -L "$uninstaller" ]] || \
   die 'Missing remote X11 bridge sources.'
 
-stage=$(ssh "${ssh_options[@]}" "$host" 'umask 077; mktemp -d "${TMPDIR:-/tmp}/imgpaste-codex-x11.XXXXXX"') || \
+stage=$(ssh "${ssh_options[@]}" "$host" 'umask 077; mktemp -d "${TMPDIR:-/tmp}/cpcv-codex-x11.XXXXXX"') || \
   die 'Could not create remote staging directory.'
-[[ "$stage" =~ ^/tmp/imgpaste-codex-x11\.[A-Za-z0-9]+$ ]] || die 'Remote staging path was invalid.'
+[[ "$stage" =~ ^/tmp/cpcv-codex-x11\.[A-Za-z0-9]+$ ]] || die 'Remote staging path was invalid.'
 cleanup() {
   ssh "${ssh_options[@]}" "$host" "find '$stage' -depth -delete" >/dev/null 2>&1 || true
 }
@@ -77,7 +77,7 @@ trap cleanup EXIT
 scp "${ssh_options[@]}" "$bridge" "$installer" "$test_script" "$uninstaller" "$host:$stage/"
 remote_args="--remote-dir $remote_dir --display $display"
 if ((enable_zsh)); then remote_args+=' --enable-zsh'; fi
-ssh "${ssh_options[@]}" "$host" "IMGPASTE_STAGE_DIR='$stage' /usr/bin/env bash '$stage/install-codex-x11-bridge.sh' $remote_args"
+ssh "${ssh_options[@]}" "$host" "CPCV_STAGE_DIR='$stage' /usr/bin/env bash '$stage/install-codex-x11-bridge.sh' $remote_args"
 trap - EXIT
 cleanup
 

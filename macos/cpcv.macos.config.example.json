@@ -1,5 +1,5 @@
 {
-  "hostAlias": "imgpaste-host",
+  "hostAlias": "cpcv-host",
   "remoteDir": "clipboard-images",
   "remoteHome": "",
   "pollIntervalSeconds": 2,

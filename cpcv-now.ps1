@@ -2,7 +2,7 @@
 param([switch]$Silent)
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "imgpaste-core.ps1")
+. (Join-Path $PSScriptRoot "cpcv-core.ps1")
 
 function Show-Toast {
     param([string]$Title, [string]$Body)
@@ -22,10 +22,10 @@ function Show-Toast {
 
 $result = Publish-ClipboardImage -Force
 if (-not $result.Ok) {
-    $msg = if ($result.Reason -eq "no-image") { "No image on clipboard. Screenshot/copy an image first." } else { "imgpaste failed: $($result.Reason)" }
-    if ($result.Reason -eq "configuration-invalid" -and $result.Detail) { $msg = "imgpaste configuration error: $($result.Detail)" }
-    if (-not $Silent) { Show-Toast "imgpaste" $msg; Write-Host $msg }
+    $msg = if ($result.Reason -eq "no-image") { "No image on clipboard. Screenshot/copy an image first." } else { "cpcv failed: $($result.Reason)" }
+    if ($result.Reason -eq "configuration-invalid" -and $result.Detail) { $msg = "cpcv configuration error: $($result.Detail)" }
+    if (-not $Silent) { Show-Toast "cpcv" $msg; Write-Host $msg }
     exit 1
 }
-if (-not $Silent) { Show-Toast "imgpaste" "Image uploaded; clipboard image preserved."; Write-Host $result.RemotePath }
+if (-not $Silent) { Show-Toast "cpcv" "Image uploaded; clipboard image preserved."; Write-Host $result.RemotePath }
 exit 0

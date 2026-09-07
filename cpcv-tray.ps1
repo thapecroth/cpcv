@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Shows a small Windows notification-area controller for imgpaste.
+Shows a small Windows notification-area controller for cpcv.
 
 .DESCRIPTION
 This is deliberately a companion to the guardian rather than a second
@@ -8,7 +8,7 @@ watcher.  It only starts or stops processes whose exact -File argument points
 to this checkout, and it reads the existing health and state files.
 
 Run it from an STA PowerShell process, for example:
-  powershell.exe -NoProfile -STA -ExecutionPolicy RemoteSigned -File .\imgpaste-tray.ps1
+  powershell.exe -NoProfile -STA -ExecutionPolicy RemoteSigned -File .\cpcv-tray.ps1
 #>
 [CmdletBinding()]
 param(
@@ -20,16 +20,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "imgpaste-core.ps1")
+. (Join-Path $PSScriptRoot "cpcv-core.ps1")
 
-function Get-ImgPasteTrayProcessProbe {
+function Get-CpcvTrayProcessProbe {
     param([Parameter(Mandatory)][string]$ScriptPath)
 
     try {
         $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop |
             Where-Object {
                 $_.Name -in @("powershell.exe", "pwsh.exe") -and
-                (Test-ImgPasteProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath $ScriptPath)
+                (Test-CpcvProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath $ScriptPath)
             })
         return [pscustomobject]@{ Available = $true; Processes = $processes; Error = "" }
     }
@@ -40,7 +40,7 @@ function Get-ImgPasteTrayProcessProbe {
     }
 }
 
-function Test-ImgPasteTrayShortcutOwnership {
+function Test-CpcvTrayShortcutOwnership {
     param(
         [Parameter(Mandatory)][string]$ShortcutPath,
         [Parameter(Mandatory)][string]$ScriptPath,
@@ -63,42 +63,42 @@ function Test-ImgPasteTrayShortcutOwnership {
         $expectedDirectory = [IO.Path]::GetFullPath($WorkingDirectory).TrimEnd('\\')
         $actualDirectory = if ($shortcut.WorkingDirectory) { [IO.Path]::GetFullPath([string]$shortcut.WorkingDirectory).TrimEnd('\\') } else { "" }
         $description = [string]$shortcut.Description
-        $marked = $description -eq "Managed by imgpaste install-tray.ps1"
-        $legacy = $description -eq "imgpaste status and controls"
+        $marked = $description -eq "Managed by cpcv install-tray.ps1"
+        $legacy = $description -eq "cpcv status and controls"
         return ($actualTarget -ieq $expectedTarget -and
-            (Test-ImgPasteProcessCommandLineForScript -CommandLine ([string]$shortcut.Arguments) -ScriptPath $ScriptPath) -and
+            (Test-CpcvProcessCommandLineForScript -CommandLine ([string]$shortcut.Arguments) -ScriptPath $ScriptPath) -and
             $actualDirectory -eq $expectedDirectory -and ($marked -or $legacy))
     }
     catch { return $false }
 }
 
-function Get-ImgPasteTrayLatestPath {
+function Get-CpcvTrayLatestPath {
     param([Parameter(Mandatory)]$Config)
 
     try {
         if (-not (Test-Path -LiteralPath $Config.LastRemotePathFile)) { return "" }
         $path = (Get-Content -LiteralPath $Config.LastRemotePathFile -Raw -ErrorAction Stop).Trim()
-        if (Test-ImgPasteRemotePath $path) { return $path }
+        if (Test-CpcvRemotePath $path) { return $path }
     }
     catch { }
     return ""
 }
 
-function Get-ImgPasteTrayState {
-    # imgpaste-core.ps1 owns its script-scoped cached configuration. Calling
+function Get-CpcvTrayState {
+    # cpcv-core.ps1 owns its script-scoped cached configuration. Calling
     # its public loader avoids depending on a caller's dot-sourcing scope.
-    $cfg = Get-ImgPasteConfig
-    $guardianScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-guardian.ps1"))
-    $watchScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-watch.ps1"))
-    $guardianProbe = Get-ImgPasteTrayProcessProbe -ScriptPath $guardianScript
-    $watchProbe = Get-ImgPasteTrayProcessProbe -ScriptPath $watchScript
+    $cfg = Get-CpcvConfig
+    $guardianScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-guardian.ps1"))
+    $watchScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-watch.ps1"))
+    $guardianProbe = Get-CpcvTrayProcessProbe -ScriptPath $guardianScript
+    $watchProbe = Get-CpcvTrayProcessProbe -ScriptPath $watchScript
     $guardians = @($guardianProbe.Processes)
     $watchers = @($watchProbe.Processes)
 
     $heartbeatInfo = $null
     $heartbeatAgeSeconds = $null
     if (Test-Path -LiteralPath $cfg.HeartbeatFile) {
-        $heartbeatInfo = Get-ImgPasteHeartbeatInfo -Path $cfg.HeartbeatFile
+        $heartbeatInfo = Get-CpcvHeartbeatInfo -Path $cfg.HeartbeatFile
         if ($heartbeatInfo) {
             $heartbeatAgeSeconds = [Math]::Max(0, ((Get-Date).ToUniversalTime() - $heartbeatInfo.Timestamp.UtcDateTime).TotalSeconds)
         }
@@ -119,12 +119,12 @@ function Get-ImgPasteTrayState {
     }
     elseif ($guardians.Count -gt 1 -or $watchers.Count -gt 1) {
         $level = "Warning"
-        $summary = "Duplicate imgpaste process detected"
+        $summary = "Duplicate cpcv process detected"
         $detail = "Use Restart service to stop only this checkout's duplicate processes."
     }
     elseif ($guardians.Count -eq 0 -and $watchers.Count -eq 0) {
         $level = "Stopped"
-        $summary = "The imgpaste service is stopped"
+        $summary = "The cpcv service is stopped"
         $detail = "Start service to launch the guardian."
     }
     elseif ($guardians.Count -eq 0) {
@@ -154,11 +154,11 @@ function Get-ImgPasteTrayState {
     }
     else {
         $level = "Healthy"
-        $summary = "imgpaste is running"
+        $summary = "cpcv is running"
         $detail = $heartbeatInfo.Status
     }
 
-    $latestPath = Get-ImgPasteTrayLatestPath -Config $cfg
+    $latestPath = Get-CpcvTrayLatestPath -Config $cfg
     return [pscustomobject]@{
         Level = $level
         Summary = $summary
@@ -174,16 +174,16 @@ function Get-ImgPasteTrayState {
     }
 }
 
-function Get-ImgPasteTrayTooltip {
+function Get-CpcvTrayTooltip {
     param([Parameter(Mandatory)]$State)
     # NotifyIcon accepts at most 63 characters.  Do not put hosts, paths, or
     # log details in a system-wide hover tooltip.
-    $text = "imgpaste: $($State.Level) - $(ConvertTo-ImgPasteTrayDisplayText -Text $State.Summary -MaximumLength 42)"
+    $text = "cpcv: $($State.Level) - $(ConvertTo-CpcvTrayDisplayText -Text $State.Summary -MaximumLength 42)"
     if ($text.Length -gt 63) { return $text.Substring(0, 60) + "..." }
     return $text
 }
 
-function ConvertTo-ImgPasteTrayDisplayText {
+function ConvertTo-CpcvTrayDisplayText {
     param(
         [AllowNull()][string]$Text,
         [ValidateRange(24, 2048)][int]$MaximumLength = 280
@@ -192,13 +192,13 @@ function ConvertTo-ImgPasteTrayDisplayText {
     # The status dashboard is intentionally a small, local summary. Never
     # turn a subprocess/configuration detail into an unbounded or credential-
     # bearing UI string, even if a future caller changes the state source.
-    $safe = Protect-ImgPasteLogDetail $Text
+    $safe = Protect-CpcvLogDetail $Text
     $safe = ($safe -replace '[\r\n\t]+', ' ').Trim()
     if ($safe.Length -gt $MaximumLength) { return $safe.Substring(0, $MaximumLength - 1) + [char]0x2026 }
     return $safe
 }
 
-function Get-ImgPasteTrayStatusStyle {
+function Get-CpcvTrayStatusStyle {
     param([Parameter(Mandatory)][string]$Level)
 
     switch ($Level) {
@@ -210,7 +210,7 @@ function Get-ImgPasteTrayStatusStyle {
     }
 }
 
-function Get-ImgPasteTrayRelativeTimeText {
+function Get-CpcvTrayRelativeTimeText {
     param([AllowNull()][object]$AgeSeconds)
 
     if ($null -eq $AgeSeconds) { return "Waiting for first heartbeat" }
@@ -226,11 +226,11 @@ function Get-ImgPasteTrayRelativeTimeText {
     return "${days} day$($(if ($days -eq 1) { '' } else { 's' })) ago"
 }
 
-function Get-ImgPasteTrayGuidance {
+function Get-CpcvTrayGuidance {
     param([Parameter(Mandatory)]$State)
 
     switch ($State.Level) {
-        "Healthy" { return "Take screenshots as usual. imgpaste will upload new clipboard images automatically." }
+        "Healthy" { return "Take screenshots as usual. cpcv will upload new clipboard images automatically." }
         "Stopped" { return "Start automatic uploads to resume watching the image clipboard." }
         "Error" { return "Open settings, correct the local configuration, then start the service." }
         "Warning" { return "Use Repair service if this does not clear after the next health check." }
@@ -238,12 +238,12 @@ function Get-ImgPasteTrayGuidance {
     }
 }
 
-function Get-ImgPasteTrayColor {
+function Get-CpcvTrayColor {
     param([Parameter(Mandatory)][string]$Hex)
     return [System.Drawing.ColorTranslator]::FromHtml($Hex)
 }
 
-function Set-ImgPasteTrayButtonStyle {
+function Set-CpcvTrayButtonStyle {
     param(
         [Parameter(Mandatory)][System.Windows.Forms.Button]$Button,
         [ValidateSet("Primary", "Secondary", "Quiet")][string]$Kind = "Secondary"
@@ -255,34 +255,34 @@ function Set-ImgPasteTrayButtonStyle {
     $Button.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
     switch ($Kind) {
         "Primary" {
-            $Button.BackColor = Get-ImgPasteTrayColor "#2563EB"
+            $Button.BackColor = Get-CpcvTrayColor "#2563EB"
             $Button.ForeColor = [System.Drawing.Color]::White
-            $Button.FlatAppearance.BorderColor = Get-ImgPasteTrayColor "#2563EB"
-            $Button.FlatAppearance.MouseOverBackColor = Get-ImgPasteTrayColor "#1D4ED8"
-            $Button.FlatAppearance.MouseDownBackColor = Get-ImgPasteTrayColor "#1E40AF"
+            $Button.FlatAppearance.BorderColor = Get-CpcvTrayColor "#2563EB"
+            $Button.FlatAppearance.MouseOverBackColor = Get-CpcvTrayColor "#1D4ED8"
+            $Button.FlatAppearance.MouseDownBackColor = Get-CpcvTrayColor "#1E40AF"
         }
         "Quiet" {
-            $Button.BackColor = Get-ImgPasteTrayColor "#F8FAFC"
-            $Button.ForeColor = Get-ImgPasteTrayColor "#334155"
-            $Button.FlatAppearance.BorderColor = Get-ImgPasteTrayColor "#CBD5E1"
-            $Button.FlatAppearance.MouseOverBackColor = Get-ImgPasteTrayColor "#E2E8F0"
-            $Button.FlatAppearance.MouseDownBackColor = Get-ImgPasteTrayColor "#CBD5E1"
+            $Button.BackColor = Get-CpcvTrayColor "#F8FAFC"
+            $Button.ForeColor = Get-CpcvTrayColor "#334155"
+            $Button.FlatAppearance.BorderColor = Get-CpcvTrayColor "#CBD5E1"
+            $Button.FlatAppearance.MouseOverBackColor = Get-CpcvTrayColor "#E2E8F0"
+            $Button.FlatAppearance.MouseDownBackColor = Get-CpcvTrayColor "#CBD5E1"
         }
         default {
             $Button.BackColor = [System.Drawing.Color]::White
-            $Button.ForeColor = Get-ImgPasteTrayColor "#1E3A5F"
-            $Button.FlatAppearance.BorderColor = Get-ImgPasteTrayColor "#93C5FD"
-            $Button.FlatAppearance.MouseOverBackColor = Get-ImgPasteTrayColor "#EFF6FF"
-            $Button.FlatAppearance.MouseDownBackColor = Get-ImgPasteTrayColor "#DBEAFE"
+            $Button.ForeColor = Get-CpcvTrayColor "#1E3A5F"
+            $Button.FlatAppearance.BorderColor = Get-CpcvTrayColor "#93C5FD"
+            $Button.FlatAppearance.MouseOverBackColor = Get-CpcvTrayColor "#EFF6FF"
+            $Button.FlatAppearance.MouseDownBackColor = Get-CpcvTrayColor "#DBEAFE"
         }
     }
 }
 
-function New-ImgPasteTrayMetricCard {
+function New-CpcvTrayMetricCard {
     param([Parameter(Mandatory)][string]$Title)
 
     $border = New-Object System.Windows.Forms.Panel
-    $border.BackColor = Get-ImgPasteTrayColor "#D9E2F0"
+    $border.BackColor = Get-CpcvTrayColor "#D9E2F0"
     $border.Dock = [System.Windows.Forms.DockStyle]::Fill
     $border.Padding = New-Object System.Windows.Forms.Padding(1)
 
@@ -296,14 +296,14 @@ function New-ImgPasteTrayMetricCard {
     $titleLabel.Text = $Title.ToUpperInvariant()
     $titleLabel.AutoSize = $true
     $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8)
-    $titleLabel.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $titleLabel.ForeColor = Get-CpcvTrayColor "#64748B"
     $titleLabel.Location = New-Object System.Drawing.Point(14, 12)
     $content.Controls.Add($titleLabel)
 
     $valueLabel = New-Object System.Windows.Forms.Label
     $valueLabel.AutoEllipsis = $true
     $valueLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
-    $valueLabel.ForeColor = Get-ImgPasteTrayColor "#0F172A"
+    $valueLabel.ForeColor = Get-CpcvTrayColor "#0F172A"
     $valueLabel.Location = New-Object System.Drawing.Point(14, 33)
     $valueLabel.Size = New-Object System.Drawing.Size(215, 26)
     $content.Controls.Add($valueLabel)
@@ -311,7 +311,7 @@ function New-ImgPasteTrayMetricCard {
     $detailLabel = New-Object System.Windows.Forms.Label
     $detailLabel.AutoEllipsis = $true
     $detailLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
-    $detailLabel.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $detailLabel.ForeColor = Get-CpcvTrayColor "#64748B"
     $detailLabel.Location = New-Object System.Drawing.Point(14, 62)
     $detailLabel.Size = New-Object System.Drawing.Size(215, 19)
     $content.Controls.Add($detailLabel)
@@ -319,24 +319,24 @@ function New-ImgPasteTrayMetricCard {
     return [pscustomobject]@{ Container = $border; Value = $valueLabel; Detail = $detailLabel }
 }
 
-function Get-ImgPasteTrayIconAssetPath {
+function Get-CpcvTrayIconAssetPath {
     # Keep branding with the checked-in source rather than a user profile or
     # configuration value. A custom icon must never become another input that
     # can point the tray at an arbitrary local file.
-    return (Join-Path $PSScriptRoot "assets\windows\imgpaste-tray.ico")
+    return (Join-Path $PSScriptRoot "assets\windows\cpcv-tray.ico")
 }
 
-function Get-ImgPasteTrayLogoAssetPath {
+function Get-CpcvTrayLogoAssetPath {
     # The dashboard logo is also a checked-in project asset, not a configured
     # local path. That keeps the UI deterministic and avoids another
     # filesystem input in a process that starts at logon.
-    return (Join-Path $PSScriptRoot "assets\windows\imgpaste-logo.png")
+    return (Join-Path $PSScriptRoot "assets\windows\cpcv-logo.png")
 }
 
-function Get-ImgPasteTrayLogo {
+function Get-CpcvTrayLogo {
     [CmdletBinding()]
     param(
-        [string]$LogoPath = (Get-ImgPasteTrayLogoAssetPath)
+        [string]$LogoPath = (Get-CpcvTrayLogoAssetPath)
     )
 
     $bitmap = $null
@@ -372,13 +372,13 @@ function Get-ImgPasteTrayLogo {
     }
 }
 
-function Get-ImgPasteTrayIcon {
+function Get-CpcvTrayIcon {
     [CmdletBinding()]
     param(
         # This is overridable only so the local-only tests can exercise bad
         # assets without changing a real checkout. Production callers use the
         # project-local default above.
-        [string]$IconPath = (Get-ImgPasteTrayIconAssetPath)
+        [string]$IconPath = (Get-CpcvTrayIconAssetPath)
     )
 
     try {
@@ -386,7 +386,7 @@ function Get-ImgPasteTrayIcon {
         $fallback = [System.Drawing.SystemIcons]::Application
     }
     catch {
-        throw "imgpaste tray icons require the Windows System.Drawing assembly."
+        throw "cpcv tray icons require the Windows System.Drawing assembly."
     }
     $fallbackResult = {
         param([string]$Reason)
@@ -455,26 +455,26 @@ function Get-ImgPasteTrayIcon {
     }
 }
 
-function Start-ImgPasteTrayGuardian {
-    $cfg = Get-ImgPasteConfig
+function Start-CpcvTrayGuardian {
+    $cfg = Get-CpcvConfig
     if ($cfg.ConfigError) { throw $cfg.ConfigError }
-    $guardianScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-guardian.ps1"))
-    $probe = Get-ImgPasteTrayProcessProbe -ScriptPath $guardianScript
+    $guardianScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-guardian.ps1"))
+    $probe = Get-CpcvTrayProcessProbe -ScriptPath $guardianScript
     if (-not $probe.Available) { throw "Cannot inspect local processes; refusing to start another guardian." }
     if ((@($probe.Processes)).Count -gt 0) { return $false }
 
     Start-Process -FilePath "powershell.exe" -ArgumentList @(
         "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", ('"{0}"' -f $guardianScript)
     ) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden | Out-Null
-    Write-ImgPasteLog "tray requested guardian start"
+    Write-CpcvLog "tray requested guardian start"
     return $true
 }
 
-function Stop-ImgPasteTrayService {
-    $guardianScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-guardian.ps1"))
-    $watchScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-watch.ps1"))
-    $guardianProbe = Get-ImgPasteTrayProcessProbe -ScriptPath $guardianScript
-    $watchProbe = Get-ImgPasteTrayProcessProbe -ScriptPath $watchScript
+function Stop-CpcvTrayService {
+    $guardianScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-guardian.ps1"))
+    $watchScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-watch.ps1"))
+    $guardianProbe = Get-CpcvTrayProcessProbe -ScriptPath $guardianScript
+    $watchProbe = Get-CpcvTrayProcessProbe -ScriptPath $watchScript
     if (-not $guardianProbe.Available -or -not $watchProbe.Available) {
         throw "Cannot inspect local processes; refusing to stop anything."
     }
@@ -483,67 +483,67 @@ function Stop-ImgPasteTrayService {
     # watcher that the user explicitly asked to stop.  Both lists are scoped
     # by the exact checkout path, never a filename-only match.
     foreach ($process in @($guardianProbe.Processes) + @($watchProbe.Processes)) {
-        Stop-ImgPasteProcessTree -ProcessId ([int]$process.ProcessId)
+        Stop-CpcvProcessTree -ProcessId ([int]$process.ProcessId)
     }
-    Write-ImgPasteLog "tray requested service stop"
+    Write-CpcvLog "tray requested service stop"
 }
 
-function Restart-ImgPasteTrayService {
-    Stop-ImgPasteTrayService
+function Restart-CpcvTrayService {
+    Stop-CpcvTrayService
     Start-Sleep -Milliseconds 500
-    [void](Start-ImgPasteTrayGuardian)
-    Write-ImgPasteLog "tray requested service restart"
+    [void](Start-CpcvTrayGuardian)
+    Write-CpcvLog "tray requested service restart"
 }
 
-function Start-ImgPasteTrayUpload {
-    $cfg = Get-ImgPasteConfig
+function Start-CpcvTrayUpload {
+    $cfg = Get-CpcvConfig
     if ($cfg.ConfigError) { throw $cfg.ConfigError }
-    $nowScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "imgpaste-now.ps1"))
+    $nowScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-now.ps1"))
     Start-Process -FilePath "powershell.exe" -ArgumentList @(
         "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", ('"{0}"' -f $nowScript), "-Silent"
     ) -WorkingDirectory $PSScriptRoot -WindowStyle Hidden | Out-Null
-    Write-ImgPasteLog "tray requested one-shot clipboard upload"
+    Write-CpcvLog "tray requested one-shot clipboard upload"
 }
 
-function Copy-ImgPasteTrayLatestPath {
+function Copy-CpcvTrayLatestPath {
     param([Parameter(Mandatory)]$State)
-    if ([string]::IsNullOrWhiteSpace($State.LatestPath) -or -not (Test-ImgPasteRemotePath $State.LatestPath)) {
+    if ([string]::IsNullOrWhiteSpace($State.LatestPath) -or -not (Test-CpcvRemotePath $State.LatestPath)) {
         throw "There is no valid uploaded path to copy yet."
     }
     Set-Clipboard -Value $State.LatestPath
 }
 
-function Open-ImgPasteTrayLog {
-    $path = (Get-ImgPasteConfig).LogFile
+function Open-CpcvTrayLog {
+    $path = (Get-CpcvConfig).LogFile
     $directory = Split-Path -Parent $path
     if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
     if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType File -Force -Path $path | Out-Null }
     Start-Process -FilePath "notepad.exe" -ArgumentList @(('"{0}"' -f $path)) | Out-Null
 }
 
-function Open-ImgPasteTrayConfig {
-    $path = Get-ImgPasteConfigPath
+function Open-CpcvTrayConfig {
+    $path = Get-CpcvConfigPath
     $directory = Split-Path -Parent $path
     if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
     if (-not (Test-Path -LiteralPath $path)) {
-        $example = Join-Path $PSScriptRoot "imgpaste.config.example.psd1"
+        $example = Join-Path $PSScriptRoot "cpcv.config.example.psd1"
         Copy-Item -LiteralPath $example -Destination $path -Force
     }
     Start-Process -FilePath "notepad.exe" -ArgumentList @(('"{0}"' -f $path)) | Out-Null
 }
 
-function Open-ImgPasteTrayDataFolder {
-    $path = (Get-ImgPasteConfig).DataRoot
+function Open-CpcvTrayDataFolder {
+    $path = (Get-CpcvConfig).DataRoot
     if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
     Start-Process -FilePath "explorer.exe" -ArgumentList @(('"{0}"' -f $path)) | Out-Null
 }
 
-function Show-ImgPasteTrayError {
+function Show-CpcvTrayError {
     param([Parameter(Mandatory)][string]$Message)
-    [void][System.Windows.Forms.MessageBox]::Show($Message, "imgpaste", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
+    [void][System.Windows.Forms.MessageBox]::Show($Message, "cpcv", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
 }
 
-function Show-ImgPasteTrayStatusWindow {
+function Show-CpcvTrayStatusWindow {
     param(
         [Parameter(Mandatory)]$State,
         # TestMode exists solely for the local synthetic STA smoke test. It
@@ -557,14 +557,14 @@ function Show-ImgPasteTrayStatusWindow {
     # Load them here so opening status does not depend on hidden caller state.
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    $windowIcon = Get-ImgPasteTrayIcon
-    $logoImage = Get-ImgPasteTrayLogo
+    $windowIcon = Get-CpcvTrayIcon
+    $logoImage = Get-CpcvTrayLogo
     $form = $null
     $tooltip = $null
     try {
         $form = New-Object System.Windows.Forms.Form
-        $form.Name = "imgpasteTrayStatusDashboard"
-        $form.Text = "imgpaste status"
+        $form.Name = "cpcvTrayStatusDashboard"
+        $form.Text = "cpcv status"
         $form.Icon = $windowIcon.Icon
         $form.StartPosition = if ($TestMode) { [System.Windows.Forms.FormStartPosition]::Manual } else { [System.Windows.Forms.FormStartPosition]::CenterScreen }
         if ($TestMode) {
@@ -574,7 +574,7 @@ function Show-ImgPasteTrayStatusWindow {
         }
         $form.ClientSize = New-Object System.Drawing.Size(840, 575)
         $form.MinimumSize = New-Object System.Drawing.Size(760, 545)
-        $form.BackColor = Get-ImgPasteTrayColor "#F6F8FC"
+        $form.BackColor = Get-CpcvTrayColor "#F6F8FC"
         $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
         $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
         $form.KeyPreview = $true
@@ -604,7 +604,7 @@ function Show-ImgPasteTrayStatusWindow {
 
     if ($logoImage) {
         $logo = New-Object System.Windows.Forms.PictureBox
-        $logo.Name = "imgpasteTrayBrandLogo"
+        $logo.Name = "cpcvTrayBrandLogo"
         $logo.Image = $logoImage
         $logo.SizeMode = [System.Windows.Forms.PictureBoxSizeMode]::Zoom
         $logo.Size = New-Object System.Drawing.Size(48, 48)
@@ -613,10 +613,10 @@ function Show-ImgPasteTrayStatusWindow {
     }
 
     $title = New-Object System.Windows.Forms.Label
-    $title.Text = "imgpaste"
+    $title.Text = "cpcv"
     $title.AutoSize = $true
     $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
-    $title.ForeColor = Get-ImgPasteTrayColor "#0F172A"
+    $title.ForeColor = Get-CpcvTrayColor "#0F172A"
     $title.Location = New-Object System.Drawing.Point($(if ($logoImage) { 58 } else { 0 }), 0)
     $header.Controls.Add($title)
 
@@ -624,21 +624,21 @@ function Show-ImgPasteTrayStatusWindow {
     $subtitle.Text = "Clipboard image uploader"
     $subtitle.AutoSize = $true
     $subtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
-    $subtitle.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $subtitle.ForeColor = Get-CpcvTrayColor "#64748B"
     $subtitle.Location = New-Object System.Drawing.Point($(if ($logoImage) { 60 } else { 2 }), 34)
     $header.Controls.Add($subtitle)
 
     $refreshButton = New-Object System.Windows.Forms.Button
-    $refreshButton.Name = "imgpasteTrayRefreshButton"
+    $refreshButton.Name = "cpcvTrayRefreshButton"
     $refreshButton.Text = "Refresh status"
     $refreshButton.Size = New-Object System.Drawing.Size(120, 34)
     $refreshButton.Location = New-Object System.Drawing.Point(672, 8)
     $refreshButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-    Set-ImgPasteTrayButtonStyle -Button $refreshButton -Kind Quiet
+    Set-CpcvTrayButtonStyle -Button $refreshButton -Kind Quiet
     $header.Controls.Add($refreshButton)
 
     $statusBanner = New-Object System.Windows.Forms.Panel
-    $statusBanner.Name = "imgpasteTrayStatusBanner"
+    $statusBanner.Name = "cpcvTrayStatusBanner"
     $statusBanner.Dock = [System.Windows.Forms.DockStyle]::Fill
     $statusBanner.Padding = New-Object System.Windows.Forms.Padding(20, 17, 20, 14)
     $statusBanner.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 12)
@@ -684,9 +684,9 @@ function Show-ImgPasteTrayStatusWindow {
     [void]$metrics.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 33.334)))
     $layout.Controls.Add($metrics, 0, 2)
 
-    $serviceCard = New-ImgPasteTrayMetricCard -Title "Automatic uploads"
-    $heartbeatCard = New-ImgPasteTrayMetricCard -Title "Last heartbeat"
-    $latestCard = New-ImgPasteTrayMetricCard -Title "Latest image"
+    $serviceCard = New-CpcvTrayMetricCard -Title "Automatic uploads"
+    $heartbeatCard = New-CpcvTrayMetricCard -Title "Last heartbeat"
+    $latestCard = New-CpcvTrayMetricCard -Title "Latest image"
     $serviceCard.Container.Margin = New-Object System.Windows.Forms.Padding(0, 0, 8, 0)
     $heartbeatCard.Container.Margin = New-Object System.Windows.Forms.Padding(4, 0, 4, 0)
     $latestCard.Container.Margin = New-Object System.Windows.Forms.Padding(8, 0, 0, 0)
@@ -695,7 +695,7 @@ function Show-ImgPasteTrayStatusWindow {
     $metrics.Controls.Add($latestCard.Container, 2, 0)
 
     $actionsBorder = New-Object System.Windows.Forms.Panel
-    $actionsBorder.BackColor = Get-ImgPasteTrayColor "#D9E2F0"
+    $actionsBorder.BackColor = Get-CpcvTrayColor "#D9E2F0"
     $actionsBorder.Dock = [System.Windows.Forms.DockStyle]::Fill
     $actionsBorder.Padding = New-Object System.Windows.Forms.Padding(1)
     $actionsBorder.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 10)
@@ -711,7 +711,7 @@ function Show-ImgPasteTrayStatusWindow {
     $actionsTitle.Text = "Quick actions"
     $actionsTitle.AutoSize = $true
     $actionsTitle.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
-    $actionsTitle.ForeColor = Get-ImgPasteTrayColor "#0F172A"
+    $actionsTitle.ForeColor = Get-CpcvTrayColor "#0F172A"
     $actionsTitle.Location = New-Object System.Drawing.Point(20, 16)
     $actions.Controls.Add($actionsTitle)
 
@@ -719,71 +719,71 @@ function Show-ImgPasteTrayStatusWindow {
     $actionsCaption.Text = "Manage this checkout only. The tray never starts a second uploader."
     $actionsCaption.AutoSize = $true
     $actionsCaption.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
-    $actionsCaption.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $actionsCaption.ForeColor = Get-CpcvTrayColor "#64748B"
     $actionsCaption.Location = New-Object System.Drawing.Point(20, 40)
     $actions.Controls.Add($actionsCaption)
 
     $uploadButton = New-Object System.Windows.Forms.Button
-    $uploadButton.Name = "imgpasteTrayUploadButton"
+    $uploadButton.Name = "cpcvTrayUploadButton"
     $uploadButton.Text = "Upload clipboard image"
     $uploadButton.Size = New-Object System.Drawing.Size(206, 38)
     $uploadButton.Location = New-Object System.Drawing.Point(20, 69)
-    Set-ImgPasteTrayButtonStyle -Button $uploadButton -Kind Primary
+    Set-CpcvTrayButtonStyle -Button $uploadButton -Kind Primary
     $actions.Controls.Add($uploadButton)
 
     $copyButton = New-Object System.Windows.Forms.Button
-    $copyButton.Name = "imgpasteTrayCopyButton"
+    $copyButton.Name = "cpcvTrayCopyButton"
     $copyButton.Size = New-Object System.Drawing.Size(178, 38)
     $copyButton.Location = New-Object System.Drawing.Point(236, 69)
-    Set-ImgPasteTrayButtonStyle -Button $copyButton -Kind Secondary
+    Set-CpcvTrayButtonStyle -Button $copyButton -Kind Secondary
     $actions.Controls.Add($copyButton)
 
     $serviceButton = New-Object System.Windows.Forms.Button
-    $serviceButton.Name = "imgpasteTrayServiceButton"
+    $serviceButton.Name = "cpcvTrayServiceButton"
     $serviceButton.Size = New-Object System.Drawing.Size(184, 38)
     $serviceButton.Location = New-Object System.Drawing.Point(424, 69)
-    Set-ImgPasteTrayButtonStyle -Button $serviceButton -Kind Secondary
+    Set-CpcvTrayButtonStyle -Button $serviceButton -Kind Secondary
     $actions.Controls.Add($serviceButton)
 
     $settingsButton = New-Object System.Windows.Forms.Button
-    $settingsButton.Name = "imgpasteTraySettingsButton"
+    $settingsButton.Name = "cpcvTraySettingsButton"
     $settingsButton.Text = "Open settings"
     $settingsButton.Size = New-Object System.Drawing.Size(112, 30)
     $settingsButton.Location = New-Object System.Drawing.Point(20, 119)
-    Set-ImgPasteTrayButtonStyle -Button $settingsButton -Kind Quiet
+    Set-CpcvTrayButtonStyle -Button $settingsButton -Kind Quiet
     $actions.Controls.Add($settingsButton)
 
     $logButton = New-Object System.Windows.Forms.Button
-    $logButton.Name = "imgpasteTrayLogButton"
+    $logButton.Name = "cpcvTrayLogButton"
     $logButton.Text = "Open log"
     $logButton.Size = New-Object System.Drawing.Size(92, 30)
     $logButton.Location = New-Object System.Drawing.Point(142, 119)
-    Set-ImgPasteTrayButtonStyle -Button $logButton -Kind Quiet
+    Set-CpcvTrayButtonStyle -Button $logButton -Kind Quiet
     $actions.Controls.Add($logButton)
 
     $dataButton = New-Object System.Windows.Forms.Button
-    $dataButton.Name = "imgpasteTrayDataButton"
+    $dataButton.Name = "cpcvTrayDataButton"
     $dataButton.Text = "Open data folder"
     $dataButton.Size = New-Object System.Drawing.Size(128, 30)
     $dataButton.Location = New-Object System.Drawing.Point(244, 119)
-    Set-ImgPasteTrayButtonStyle -Button $dataButton -Kind Quiet
+    Set-CpcvTrayButtonStyle -Button $dataButton -Kind Quiet
     $actions.Controls.Add($dataButton)
 
     $actionFeedback = New-Object System.Windows.Forms.Label
     $actionFeedback.AutoEllipsis = $true
     $actionFeedback.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
-    $actionFeedback.ForeColor = Get-ImgPasteTrayColor "#475569"
+    $actionFeedback.ForeColor = Get-CpcvTrayColor "#475569"
     $actionFeedback.Location = New-Object System.Drawing.Point(20, 158)
     $actionFeedback.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
     $actionFeedback.Size = New-Object System.Drawing.Size(750, 20)
     $actions.Controls.Add($actionFeedback)
 
     $footer = New-Object System.Windows.Forms.Label
-    $footer.Text = "Tip: take a screenshot as usual; imgpaste reacts only to image clipboard entries."
+    $footer.Text = "Tip: take a screenshot as usual; cpcv reacts only to image clipboard entries."
     $footer.AutoEllipsis = $true
     $footer.Dock = [System.Windows.Forms.DockStyle]::Fill
     $footer.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
-    $footer.ForeColor = Get-ImgPasteTrayColor "#64748B"
+    $footer.ForeColor = Get-CpcvTrayColor "#64748B"
     $footer.TextAlign = [System.Drawing.ContentAlignment]::MiddleLeft
     $layout.Controls.Add($footer, 0, 4)
 
@@ -796,27 +796,27 @@ function Show-ImgPasteTrayStatusWindow {
     $refreshDashboard = {
         param([Parameter(Mandatory)]$CurrentState)
 
-        $style = Get-ImgPasteTrayStatusStyle -Level $CurrentState.Level
-        $statusBanner.BackColor = Get-ImgPasteTrayColor $style.Surface
-        $statusDot.ForeColor = Get-ImgPasteTrayColor $style.Accent
+        $style = Get-CpcvTrayStatusStyle -Level $CurrentState.Level
+        $statusBanner.BackColor = Get-CpcvTrayColor $style.Surface
+        $statusDot.ForeColor = Get-CpcvTrayColor $style.Accent
         $statusBadge.Text = $style.Badge.ToUpperInvariant()
-        $statusBadge.BackColor = Get-ImgPasteTrayColor $style.Accent
+        $statusBadge.BackColor = Get-CpcvTrayColor $style.Accent
         $statusBadge.ForeColor = [System.Drawing.Color]::White
-        $statusSummary.Text = ConvertTo-ImgPasteTrayDisplayText -Text $CurrentState.Summary -MaximumLength 200
-        $statusSummary.ForeColor = Get-ImgPasteTrayColor $style.Foreground
-        $statusDetail.Text = ConvertTo-ImgPasteTrayDisplayText -Text $CurrentState.Detail -MaximumLength 260
-        if ([string]::IsNullOrWhiteSpace($statusDetail.Text)) { $statusDetail.Text = Get-ImgPasteTrayGuidance -State $CurrentState }
-        $statusDetail.ForeColor = Get-ImgPasteTrayColor $style.Foreground
+        $statusSummary.Text = ConvertTo-CpcvTrayDisplayText -Text $CurrentState.Summary -MaximumLength 200
+        $statusSummary.ForeColor = Get-CpcvTrayColor $style.Foreground
+        $statusDetail.Text = ConvertTo-CpcvTrayDisplayText -Text $CurrentState.Detail -MaximumLength 260
+        if ([string]::IsNullOrWhiteSpace($statusDetail.Text)) { $statusDetail.Text = Get-CpcvTrayGuidance -State $CurrentState }
+        $statusDetail.ForeColor = Get-CpcvTrayColor $style.Foreground
 
         $guardianCount = (@($CurrentState.Guardians)).Count
         $watcherCount = (@($CurrentState.Watchers)).Count
         $serviceRunning = ($guardianCount -gt 0 -or $watcherCount -gt 0)
         $serviceCard.Value.Text = if ($CurrentState.Level -eq "Healthy") { "Running" } elseif ($serviceRunning) { "Needs attention" } else { "Stopped" }
-        $serviceCard.Value.ForeColor = Get-ImgPasteTrayColor $style.Foreground
+        $serviceCard.Value.ForeColor = Get-CpcvTrayColor $style.Foreground
         $serviceCard.Detail.Text = "$guardianCount guardian; $watcherCount watcher"
-        $heartbeatCard.Value.Text = Get-ImgPasteTrayRelativeTimeText -AgeSeconds $CurrentState.HeartbeatAgeSeconds
+        $heartbeatCard.Value.Text = Get-CpcvTrayRelativeTimeText -AgeSeconds $CurrentState.HeartbeatAgeSeconds
         $heartbeatCard.Detail.Text = if ($CurrentState.Heartbeat) { "Watcher: $($CurrentState.Heartbeat.Status)" } else { "No valid health record" }
-        $hasLatestPath = (-not [string]::IsNullOrWhiteSpace($CurrentState.LatestPath) -and (Test-ImgPasteRemotePath $CurrentState.LatestPath))
+        $hasLatestPath = (-not [string]::IsNullOrWhiteSpace($CurrentState.LatestPath) -and (Test-CpcvRemotePath $CurrentState.LatestPath))
         $latestCard.Value.Text = if ($hasLatestPath) { "Ready to copy" } else { "No upload yet" }
         $latestCard.Detail.Text = if ($hasLatestPath) { "Latest path is available locally" } else { "Upload an image to create one" }
 
@@ -825,48 +825,48 @@ function Show-ImgPasteTrayStatusWindow {
         $copyButton.Text = if ($hasLatestPath) { "Copy latest path" } else { "No upload path yet" }
         $serviceButton.Text = if (-not $serviceRunning) { "Start automatic uploads" } elseif ($CurrentState.Level -in @("Warning", "Unknown")) { "Repair service" } else { "Restart service" }
         $serviceButton.Enabled = ($CurrentState.Level -ne "Error" -and $CurrentState.GuardianProbeAvailable -and ((-not $serviceRunning) -or $CurrentState.WatcherProbeAvailable))
-        $actionFeedback.Text = Get-ImgPasteTrayGuidance -State $CurrentState
-        $form.Text = "imgpaste status - $($style.Badge)"
+        $actionFeedback.Text = Get-CpcvTrayGuidance -State $CurrentState
+        $form.Text = "cpcv status - $($style.Badge)"
     }.GetNewClosure()
 
     $refreshButton.Add_Click({
         try {
-            $freshState = Get-ImgPasteTrayState
+            $freshState = Get-CpcvTrayState
             & $refreshDashboard $freshState
         }
-        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
     $uploadButton.Add_Click({
         try {
-            Start-ImgPasteTrayUpload
+            Start-CpcvTrayUpload
             $actionFeedback.Text = "Upload requested. Refresh status after the clipboard image is processed."
         }
-        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
     $copyButton.Add_Click({
         try {
-            $currentState = Get-ImgPasteTrayState
-            Copy-ImgPasteTrayLatestPath -State $currentState
+            $currentState = Get-CpcvTrayState
+            Copy-CpcvTrayLatestPath -State $currentState
             $actionFeedback.Text = "Latest upload path copied to the clipboard."
         }
-        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
     $serviceButton.Add_Click({
         try {
-            $currentState = Get-ImgPasteTrayState
+            $currentState = Get-CpcvTrayState
             $currentlyRunning = ((@($currentState.Guardians)).Count -gt 0 -or (@($currentState.Watchers)).Count -gt 0)
-            if ($currentlyRunning) { Restart-ImgPasteTrayService } else { [void](Start-ImgPasteTrayGuardian) }
+            if ($currentlyRunning) { Restart-CpcvTrayService } else { [void](Start-CpcvTrayGuardian) }
             Start-Sleep -Milliseconds 350
-            & $refreshDashboard (Get-ImgPasteTrayState)
+            & $refreshDashboard (Get-CpcvTrayState)
         }
-        catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
-    $settingsButton.Add_Click({ try { Open-ImgPasteTrayConfig } catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) } })
-    $logButton.Add_Click({ try { Open-ImgPasteTrayLog } catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) } })
-    $dataButton.Add_Click({ try { Open-ImgPasteTrayDataFolder } catch { Show-ImgPasteTrayError (ConvertTo-ImgPasteTrayDisplayText -Text $_.Exception.Message) } })
+    $settingsButton.Add_Click({ try { Open-CpcvTrayConfig } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
+    $logButton.Add_Click({ try { Open-CpcvTrayLog } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
+    $dataButton.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
 
     $close = New-Object System.Windows.Forms.Button
-    $close.Name = "imgpasteTrayCloseButton"
+    $close.Name = "cpcvTrayCloseButton"
     $close.Text = "Close"
     $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
     $close.Size = New-Object System.Drawing.Size(92, 30)
@@ -886,21 +886,21 @@ function Show-ImgPasteTrayStatusWindow {
     }
 }
 
-function Start-ImgPasteTrayApplication {
+function Start-CpcvTrayApplication {
     if ([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentState]::STA) {
-        throw "imgpaste-tray.ps1 must be run with powershell.exe -STA. Use install-tray.ps1 to add a safe Startup shortcut."
+        throw "cpcv-tray.ps1 must be run with powershell.exe -STA. Use install-tray.ps1 to add a safe Startup shortcut."
     }
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    $mutex = New-Object System.Threading.Mutex($false, (Get-ImgPasteMutexName -Purpose "Tray"))
+    $mutex = New-Object System.Threading.Mutex($false, (Get-CpcvMutexName -Purpose "Tray"))
     if (-not $mutex.WaitOne(0, $false)) { return }
     $notify = $null
     $timer = $null
     $trayIconSelection = $null
     try {
-        $script:ImgPasteTrayState = Get-ImgPasteTrayState
-        $script:ImgPasteTrayLastLevel = ""
+        $script:CpcvTrayState = Get-CpcvTrayState
+        $script:CpcvTrayLastLevel = ""
         $menu = New-Object System.Windows.Forms.ContextMenuStrip
         $statusItem = $menu.Items.Add("Loading status...")
         $statusItem.Enabled = $false
@@ -920,43 +920,43 @@ function Start-ImgPasteTrayApplication {
         $exitItem = $menu.Items.Add("Exit tray (service stays running)")
 
         $notify = New-Object System.Windows.Forms.NotifyIcon
-        $trayIconSelection = Get-ImgPasteTrayIcon
+        $trayIconSelection = Get-CpcvTrayIcon
         $notify.Icon = $trayIconSelection.Icon
         if ($trayIconSelection.IsFallback) {
-            Write-ImgPasteLog "tray icon asset was unavailable or invalid; using the Windows application icon"
+            Write-CpcvLog "tray icon asset was unavailable or invalid; using the Windows application icon"
         }
         $notify.ContextMenuStrip = $menu
         $notify.Visible = $true
         $context = New-Object System.Windows.Forms.ApplicationContext
 
         $refreshUi = {
-            $script:ImgPasteTrayState = Get-ImgPasteTrayState
-            $state = $script:ImgPasteTrayState
+            $script:CpcvTrayState = Get-CpcvTrayState
+            $state = $script:CpcvTrayState
             $statusItem.Text = "Status: $($state.Level) - $($state.Summary)"
-            $notify.Text = Get-ImgPasteTrayTooltip -State $state
+            $notify.Text = Get-CpcvTrayTooltip -State $state
             $isRunning = ((@($state.Guardians)).Count -gt 0 -or (@($state.Watchers)).Count -gt 0)
             $startItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and -not $isRunning)
             $stopItem.Enabled = ($state.GuardianProbeAvailable -and $state.WatcherProbeAvailable -and $isRunning)
             $restartItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and $state.WatcherProbeAvailable)
-            $copyItem.Enabled = (-not [string]::IsNullOrWhiteSpace($state.LatestPath) -and (Test-ImgPasteRemotePath $state.LatestPath))
-            if ($script:ImgPasteTrayLastLevel -and $script:ImgPasteTrayLastLevel -ne $state.Level -and $state.Level -in @("Warning", "Error")) {
-                $notify.BalloonTipTitle = "imgpaste: $($state.Level)"
+            $copyItem.Enabled = (-not [string]::IsNullOrWhiteSpace($state.LatestPath) -and (Test-CpcvRemotePath $state.LatestPath))
+            if ($script:CpcvTrayLastLevel -and $script:CpcvTrayLastLevel -ne $state.Level -and $state.Level -in @("Warning", "Error")) {
+                $notify.BalloonTipTitle = "cpcv: $($state.Level)"
                 $notify.BalloonTipText = $state.Summary
                 $notify.ShowBalloonTip(3000)
             }
-            $script:ImgPasteTrayLastLevel = $state.Level
+            $script:CpcvTrayLastLevel = $state.Level
         }
 
-        $showStatusItem.Add_Click({ & $refreshUi; Show-ImgPasteTrayStatusWindow -State $script:ImgPasteTrayState })
-        $uploadItem.Add_Click({ try { Start-ImgPasteTrayUpload; $notify.ShowBalloonTip(2000, "imgpaste", "One-shot upload requested.", [System.Windows.Forms.ToolTipIcon]::Info) } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $copyItem.Add_Click({ try { Copy-ImgPasteTrayLatestPath -State $script:ImgPasteTrayState; $notify.ShowBalloonTip(1500, "imgpaste", "Latest upload path copied.", [System.Windows.Forms.ToolTipIcon]::Info) } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $startItem.Add_Click({ try { [void](Start-ImgPasteTrayGuardian); & $refreshUi } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $stopItem.Add_Click({ try { Stop-ImgPasteTrayService; & $refreshUi } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $restartItem.Add_Click({ try { Restart-ImgPasteTrayService; & $refreshUi } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $logItem.Add_Click({ try { Open-ImgPasteTrayLog } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $configItem.Add_Click({ try { Open-ImgPasteTrayConfig } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $dataItem.Add_Click({ try { Open-ImgPasteTrayDataFolder } catch { Show-ImgPasteTrayError $_.Exception.Message } })
-        $notify.Add_DoubleClick({ & $refreshUi; Show-ImgPasteTrayStatusWindow -State $script:ImgPasteTrayState })
+        $showStatusItem.Add_Click({ & $refreshUi; Show-CpcvTrayStatusWindow -State $script:CpcvTrayState })
+        $uploadItem.Add_Click({ try { Start-CpcvTrayUpload; $notify.ShowBalloonTip(2000, "cpcv", "One-shot upload requested.", [System.Windows.Forms.ToolTipIcon]::Info) } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $copyItem.Add_Click({ try { Copy-CpcvTrayLatestPath -State $script:CpcvTrayState; $notify.ShowBalloonTip(1500, "cpcv", "Latest upload path copied.", [System.Windows.Forms.ToolTipIcon]::Info) } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $startItem.Add_Click({ try { [void](Start-CpcvTrayGuardian); & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $stopItem.Add_Click({ try { Stop-CpcvTrayService; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $restartItem.Add_Click({ try { Restart-CpcvTrayService; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $logItem.Add_Click({ try { Open-CpcvTrayLog } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $configItem.Add_Click({ try { Open-CpcvTrayConfig } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $dataItem.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $notify.Add_DoubleClick({ & $refreshUi; Show-CpcvTrayStatusWindow -State $script:CpcvTrayState })
         $exitItem.Add_Click({ $context.ExitThread() })
 
         $timer = New-Object System.Windows.Forms.Timer
@@ -975,4 +975,4 @@ function Start-ImgPasteTrayApplication {
     }
 }
 
-if (-not $NoRun) { Start-ImgPasteTrayApplication }
+if (-not $NoRun) { Start-CpcvTrayApplication }

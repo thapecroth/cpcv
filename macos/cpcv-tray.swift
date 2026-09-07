@@ -1,7 +1,7 @@
-// Native macOS menu-bar companion for imgpaste.
+// Native macOS menu-bar companion for cpcv.
 //
 // It is intentionally separate from the uploader.  The only integration
-// boundary is imgpaste-macos-ctl.sh, which returns bounded JSON for `status`
+// boundary is cpcv-macos-ctl.sh, which returns bounded JSON for `status`
 // and performs named local actions.  No status value is ever passed to a
 // shell: Process receives a fixed executable and an argument array.
 
@@ -14,7 +14,7 @@ private let controlTimeout: TimeInterval = 8
 private let doctorControlTimeout: TimeInterval = 3_300
 private let settingsControlTimeout: TimeInterval = 20
 
-struct ImgPasteStatus: Decodable {
+struct CpcvStatus: Decodable {
     let version: String?
     let mode: String?
     let pid: Int?
@@ -192,7 +192,7 @@ private func relativeUpload(_ value: String?, now: Date) -> String? {
     return "\(seconds / 86_400)d ago"
 }
 
-private func recentActivityMessage(status: ImgPasteStatus?, diagnosticText: String,
+private func recentActivityMessage(status: CpcvStatus?, diagnosticText: String,
                                    diagnosticReadFailed: Bool, now: Date = Date()) -> String {
     var lines: [String] = []
     if let success = status?.lastSuccessAt {
@@ -263,7 +263,7 @@ private func trayPresentation(state rawState: String?, lastError: String?, lastS
     }
     return TrayPresentation(title: title, iconState: iconState,
                             pauseTitle: paused ? "Resume Automatic Uploads" : (running ? "Pause Automatic Uploads" : nil),
-                            doctorTitle: needsAttention ? "Repair imgpaste…" : "Check & Repair…",
+                            doctorTitle: needsAttention ? "Repair cpcv…" : "Check & Repair…",
                             needsAttention: needsAttention)
 }
 
@@ -308,14 +308,14 @@ private func runTraySelfTest() -> Int32 {
                                   doctorOverall: "needs-attention", doctorSummary: "SSH server is unreachable", now: now)
     let invalid = trayPresentation(state: "configuration-invalid", lastError: "configuration-invalid", lastSuccessAt: nil,
                                    doctorOverall: nil, doctorSummary: nil, now: now)
-    let activityStatus = ImgPasteStatus(version: "1", mode: "watch", pid: 1, updatedAt: recent, state: "healthy",
+    let activityStatus = CpcvStatus(version: "1", mode: "watch", pid: 1, updatedAt: recent, state: "healthy",
                                         lastSuccessAt: recent, lastError: nil, activeChildPgid: nil, capabilities: nil,
                                         latestPath: "/home/me/clipboard-images/latest.png", lastRemotePath: nil,
                                         logFile: nil, doctorOverall: nil, doctorSummary: nil, doctorUpdatedAt: nil)
     let activity = recentActivityMessage(status: activityStatus, diagnosticText: "", diagnosticReadFailed: false, now: now)
     guard ready.title == "Ready · Uploaded 2m ago", ready.pauseTitle == "Pause Automatic Uploads", !ready.needsAttention,
           stopped.title == "Paused", stopped.pauseTitle == "Resume Automatic Uploads",
-          broken.title == "Needs attention · SSH server is unreachable", broken.doctorTitle == "Repair imgpaste…",
+          broken.title == "Needs attention · SSH server is unreachable", broken.doctorTitle == "Repair cpcv…",
           invalid.pauseTitle == nil, invalid.needsAttention,
           activity.contains("Last successful upload: 2m ago"),
           activity.contains("No diagnostic log entries. That is normal while uploads are working."),
@@ -325,9 +325,9 @@ private func runTraySelfTest() -> Int32 {
         return 1
     }
     guard let settings = try? validatedSettingsForm(hostAlias: "me@work-server", remoteDir: "images/clipboard",
-                                                     remoteHome: "/srv/imgpaste", pollIntervalText: "5"),
+                                                     remoteHome: "/srv/cpcv", pollIntervalText: "5"),
           settings.hostAlias == "me@work-server", settings.remoteDir == "images/clipboard",
-          settings.remoteHome == "/srv/imgpaste", settings.pollIntervalSeconds == 5,
+          settings.remoteHome == "/srv/cpcv", settings.pollIntervalSeconds == 5,
           (try? validatedSettingsForm(hostAlias: "host;unsafe", remoteDir: "images", remoteHome: "", pollIntervalText: "2")) == nil,
           (try? validatedSettingsForm(hostAlias: "host", remoteDir: "../images", remoteHome: "", pollIntervalText: "2")) == nil,
           (try? validatedSettingsForm(hostAlias: "host", remoteDir: "images", remoteHome: "/tmp/../unsafe", pollIntervalText: "2")) == nil,
@@ -494,7 +494,7 @@ private final class SettingsFormView: NSView {
 }
 
 @main
-final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var controlPath = ""
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
@@ -507,7 +507,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var openLogMenuItem: NSMenuItem!
     private var statusDetailsMenuItem: NSMenuItem!
     private var timer: Timer?
-    private var currentStatus: ImgPasteStatus?
+    private var currentStatus: CpcvStatus?
     private var currentSummary = "Checking…"
     private var statusRefreshInFlight = false
     private var doctorInFlight = false
@@ -520,7 +520,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
             exit(runTraySelfTest())
         }
         let app = NSApplication.shared
-        let delegate = ImgPasteTray()
+        let delegate = CpcvTray()
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
         app.run()
@@ -529,11 +529,11 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = CommandLine.arguments
         guard let rootIndex = arguments.firstIndex(of: "--root"), rootIndex + 1 < arguments.count else {
-            showFatalConfiguration("The launcher did not provide the imgpaste checkout path.")
+            showFatalConfiguration("The launcher did not provide the cpcv checkout path.")
             return
         }
         let root = arguments[rootIndex + 1]
-        controlPath = URL(fileURLWithPath: root).appendingPathComponent("macos/imgpaste-macos-ctl.sh").path
+        controlPath = URL(fileURLWithPath: root).appendingPathComponent("macos/cpcv-macos-ctl.sh").path
         guard FileManager.default.isExecutableFile(atPath: controlPath) else {
             showFatalConfiguration("Cannot find an executable macOS controller at \(controlPath). Install the macOS uploader first.")
             return
@@ -549,7 +549,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func buildMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: 24)
         statusItem.button?.image = statusImage(for: "unknown")
-        statusItem.button?.toolTip = "imgpaste: checking local service"
+        statusItem.button?.toolTip = "cpcv: checking local service"
         if let button = statusItem.button {
             let indicator = NSProgressIndicator(frame: NSRect(x: 4, y: 3, width: 16, height: 16))
             indicator.style = .spinning
@@ -631,9 +631,9 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             let result = runControl(controlPath: self.controlPath, arguments: ["status"])
-            let status: ImgPasteStatus?
+            let status: CpcvStatus?
             if !result.timedOut, result.exitCode == 0, let data = result.stdout.data(using: .utf8) {
-                status = try? JSONDecoder().decode(ImgPasteStatus.self, from: data)
+                status = try? JSONDecoder().decode(CpcvStatus.self, from: data)
             } else {
                 status = nil
             }
@@ -647,7 +647,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func apply(status: ImgPasteStatus?, result: ControlResult) {
+    private func apply(status: CpcvStatus?, result: ControlResult) {
         currentStatus = status
         let state = status?.state?.lowercased() ?? "unknown"
         let presentation: TrayPresentation
@@ -659,11 +659,11 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if result.timedOut {
             presentation = TrayPresentation(title: "Needs attention · Status check timed out",
                                             iconState: "needs-attention", pauseTitle: nil,
-                                            doctorTitle: "Repair imgpaste…", needsAttention: true)
+                                            doctorTitle: "Repair cpcv…", needsAttention: true)
         } else {
             presentation = TrayPresentation(title: "Needs attention · Status unavailable",
                                             iconState: "needs-attention", pauseTitle: nil,
-                                            doctorTitle: "Repair imgpaste…", needsAttention: true)
+                                            doctorTitle: "Repair cpcv…", needsAttention: true)
         }
         let busy = doctorInFlight || serviceActionInFlight || settingsInFlight
         currentSummary = doctorInFlight ? "Checking and repairing…" : (serviceActionInFlight ? "Updating automatic uploads…" : (settingsInFlight ? "Updating settings…" : presentation.title))
@@ -699,14 +699,14 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func statusImage(for state: String) -> NSImage? {
         let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
-        return NSImage(systemSymbolName: statusSymbol(for: state), accessibilityDescription: "imgpaste \(state)")?.withSymbolConfiguration(configuration)
+        return NSImage(systemSymbolName: statusSymbol(for: state), accessibilityDescription: "cpcv \(state)")?.withSymbolConfiguration(configuration)
     }
 
     private func updateIndicator(state: String, summary: String) {
         statusMenuItem.title = summary
         statusMenuItem.image = statusImage(for: state)
-        statusItem.button?.toolTip = "imgpaste: \(summary)"
-        statusItem.button?.setAccessibilityLabel("imgpaste: \(summary)")
+        statusItem.button?.toolTip = "cpcv: \(summary)"
+        statusItem.button?.setAccessibilityLabel("cpcv: \(summary)")
         if state == "uploading", let activityIndicator = activityIndicator {
             statusItem.button?.image = nil
             activityIndicator.isHidden = false
@@ -736,7 +736,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if busySummary != nil { self.serviceActionInFlight = false }
                 if result.timedOut || result.exitCode != 0 {
                     let detail = result.timedOut ? "The local control command timed out." : redactForDisplay(result.stderr.isEmpty ? result.stdout : result.stderr)
-                    self.showAlert(title: "imgpaste action failed", message: detail, style: .warning)
+                    self.showAlert(title: "cpcv action failed", message: detail, style: .warning)
                 }
                 self.refreshStatus()
             }
@@ -751,7 +751,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "clock-sync": return "Clock synchronization"
         case "remote-directory": return "Remote folder"
         case "codex-bridge": return "Codex image paste"
-        default: return "imgpaste"
+        default: return "cpcv"
         }
     }
 
@@ -765,9 +765,9 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let title: String
         let style: NSAlert.Style
         switch report.overall {
-        case "healthy": title = "imgpaste is ready"; style = .informational
-        case "repaired": title = "imgpaste repaired"; style = .informational
-        default: title = "imgpaste needs attention"; style = .warning
+        case "healthy": title = "cpcv is ready"; style = .informational
+        case "repaired": title = "cpcv repaired"; style = .informational
+        default: title = "cpcv needs attention"; style = .warning
         }
         showAlert(title: title, message: lines.joined(separator: "\n"), style: style)
     }
@@ -796,7 +796,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.showDoctorReport(report)
                 } else {
                     let detail = result.timedOut ? "The repair check timed out." : redactForDisplay(result.stderr.isEmpty ? result.stdout : result.stderr)
-                    self.showAlert(title: "imgpaste repair failed", message: detail.isEmpty ? "No diagnostic report was returned." : detail, style: .warning)
+                    self.showAlert(title: "cpcv repair failed", message: detail.isEmpty ? "No diagnostic report was returned." : detail, style: .warning)
                 }
                 self.refreshStatus()
             }
@@ -815,7 +815,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lines.append("Last repair check: \(updated) — \(redactForDisplay(doctor))")
             }
         }
-        showAlert(title: "imgpaste status", message: lines.joined(separator: "\n"), style: .informational)
+        showAlert(title: "cpcv status", message: lines.joined(separator: "\n"), style: .informational)
     }
 
     @objc private func toggleAutomaticUploads() {
@@ -828,7 +828,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func copyLatestPath() {
         let latest = currentStatus?.latestPath ?? currentStatus?.lastRemotePath
         guard let latest = latest, isSafeRemotePath(latest) else {
-            showAlert(title: "imgpaste", message: "There is no valid uploaded path to copy yet.", style: .warning)
+            showAlert(title: "cpcv", message: "There is no valid uploaded path to copy yet.", style: .warning)
             return
         }
         NSPasteboard.general.clearContents()
@@ -847,7 +847,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let text = result.stdout.isEmpty ? result.stderr : result.stdout
                 let message = recentActivityMessage(status: self.currentStatus, diagnosticText: text,
                                                     diagnosticReadFailed: result.timedOut || result.exitCode != 0)
-                self.showAlert(title: "imgpaste recent activity", message: message, style: .informational)
+                self.showAlert(title: "cpcv recent activity", message: message, style: .informational)
             }
         }
     }
@@ -882,7 +882,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         while true {
             let form = SettingsFormView(settings: values)
             let alert = NSAlert()
-            alert.messageText = "imgpaste Settings"
+            alert.messageText = "cpcv Settings"
             alert.informativeText = "Use Advanced JSON only for uncommon settings not shown here."
             alert.alertStyle = .informational
             alert.accessoryView = form
@@ -965,7 +965,7 @@ final class ImgPasteTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func showFatalConfiguration(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "imgpaste tray could not start"
+        alert.messageText = "cpcv tray could not start"
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.runModal()

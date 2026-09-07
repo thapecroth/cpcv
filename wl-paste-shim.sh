@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # wl-paste shim: serve latest.png when agents request image/png from clipboard.
-[ -r "$HOME/.config/imgpaste/env" ] && . "$HOME/.config/imgpaste/env"
-REAL_WL="${IMGPASTE_REAL_WLPASTE:-${IMGPPASTE_REAL_WLPASTE:-/usr/bin/wl-paste}}"
-IMG="${IMGPASTE_DIR:-${IMGPPASTE_DIR:-$HOME/clipboard-images}}/latest.png"
+[ -r "$HOME/.config/cpcv/env" ] && . "$HOME/.config/cpcv/env"
+REAL_WL="${CPCV_REAL_WLPASTE:-/usr/bin/wl-paste}"
+IMG="${CPCV_DIR:-$HOME/clipboard-images}/latest.png"
 
 want_type=""
 list_types=0
@@ -21,7 +21,7 @@ while [ $i -lt ${#args[@]} ]; do
   i=$((i + 1))
 done
 
-PATH_TEXT="${IMGPASTE_PATH_TEXT:-${IMGPPASTE_PATH_TEXT:-$IMG}}"
+PATH_TEXT="${CPCV_PATH_TEXT:-$IMG}"
 if command -v readlink >/dev/null 2>&1 && [ -e "$IMG" ]; then
   PATH_TEXT="$(readlink -f "$IMG" 2>/dev/null || echo "$PATH_TEXT")"
 fi

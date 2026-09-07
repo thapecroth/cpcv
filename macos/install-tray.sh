@@ -3,10 +3,10 @@
 set -euo pipefail
 umask 077
 
-readonly label='io.imgpaste.tray'
+readonly label='io.cpcv.tray'
 
 die() {
-  printf 'imgpaste tray install: %s\n' "$*" >&2
+  printf 'cpcv tray install: %s\n' "$*" >&2
   exit 1
 }
 
@@ -29,7 +29,7 @@ require_macos_11() {
 }
 
 is_managed_plist() {
-  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by imgpaste install-tray.sh' "$1"
+  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by cpcv install-tray.sh' "$1"
 }
 
 job_loaded() {
@@ -37,18 +37,18 @@ job_loaded() {
 }
 
 if ! command -v swiftc >/dev/null 2>&1; then
-  printf '%s\n' "imgpaste tray requires Apple's Swift compiler. Install it with: xcode-select --install" >&2
+  printf '%s\n' "cpcv tray requires Apple's Swift compiler. Install it with: xcode-select --install" >&2
   exit 1
 fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-launcher="$script_dir/imgpaste-tray.sh"
-controller="$script_dir/imgpaste-macos-ctl.sh"
-template="$script_dir/io.imgpaste.tray.plist.template"
-source_file="$script_dir/imgpaste-tray.swift"
+launcher="$script_dir/cpcv-tray.sh"
+controller="$script_dir/cpcv-macos-ctl.sh"
+template="$script_dir/io.cpcv.tray.plist.template"
+source_file="$script_dir/cpcv-tray.swift"
 build_dir="$script_dir/build"
-tray_bin="$build_dir/imgpaste-tray"
-uploader_bin="$build_dir/imgpaste-macos"
+tray_bin="$build_dir/cpcv-tray"
+uploader_bin="$build_dir/cpcv-macos"
 uid=$(require_macos_gui_user)
 require_macos_11
 domain="gui/$uid"
@@ -66,11 +66,11 @@ plist="$launch_agents/$label.plist"
 mkdir -p "$build_dir"
 chmod 700 "$build_dir"
 [[ ! -L "$tray_bin" ]] || { printf '%s\n' "Refusing symlinked tray binary: $tray_bin" >&2; exit 1; }
-build_tmp=$(mktemp -d "$build_dir/.imgpaste-tray-build.XXXXXX")
+build_tmp=$(mktemp -d "$build_dir/.cpcv-tray-build.XXXXXX")
 trap 'rm -rf -- "$build_tmp"' EXIT
-swiftc -O -parse-as-library -framework AppKit "$source_file" -o "$build_tmp/imgpaste-tray"
-chmod 700 "$build_tmp/imgpaste-tray"
-mv -f -- "$build_tmp/imgpaste-tray" "$tray_bin"
+swiftc -O -parse-as-library -framework AppKit "$source_file" -o "$build_tmp/cpcv-tray"
+chmod 700 "$build_tmp/cpcv-tray"
+mv -f -- "$build_tmp/cpcv-tray" "$tray_bin"
 rmdir -- "$build_tmp"
 trap - EXIT
 [[ ! -L "$launch_agents" ]] || die "Refusing symlinked LaunchAgents directory: $launch_agents"
@@ -93,7 +93,7 @@ fi
 escaped_launcher=$(printf '%s' "$launcher" | sed 's/[\\&|]/\\&/g')
 temporary=$(/usr/bin/mktemp "$launch_agents/.${label}.XXXXXX")
 trap '/bin/rm -f -- "$temporary"' EXIT
-sed "s|__IMGPASTE_TRAY_LAUNCHER__|$escaped_launcher|g" "$template" > "$temporary"
+sed "s|__CPCV_TRAY_LAUNCHER__|$escaped_launcher|g" "$template" > "$temporary"
 /usr/bin/plutil -lint "$temporary" >/dev/null || die 'Generated LaunchAgent plist is invalid.'
 chmod 600 "$temporary"
 if (( existing_managed_plist )) && job_loaded; then
@@ -118,5 +118,5 @@ for _ in {1..5}; do
 done
 ((bootstrapped == 1)) || die "Could not start $label in $domain."
 launchctl kickstart -k "$domain/$label"
-printf '%s\n' "Installed and started the optional imgpaste menu-bar companion."
+printf '%s\n' "Installed and started the optional cpcv menu-bar companion."
 printf '%s\n' "It observes the existing uploader; it does not change SSH settings or upload data during installation."

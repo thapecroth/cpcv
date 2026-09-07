@@ -1,20 +1,21 @@
-# Shared helpers for imgpaste. Configuration is local-only; see
-# imgpaste.config.example.psd1 and README.md.
+# Shared helpers for cpcv. Configuration is local-only; see
+# cpcv.config.example.psd1 and README.md.
 
-$script:ImgPasteRoot = $PSScriptRoot
-$script:ImgPasteConfigPath = if ($env:IMGPASTE_CONFIG) {
-    $env:IMGPASTE_CONFIG
+$script:CpcvRoot = $PSScriptRoot
+$script:CpcvLocalAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
+$script:CpcvDefaultConfigPath = Join-Path $script:CpcvLocalAppData "cpcv\config.psd1"
+$script:CpcvConfigPath = if ($env:CPCV_CONFIG) {
+    $env:CPCV_CONFIG
 }
 else {
-    $localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
-    Join-Path $localAppData "imgpaste\config.psd1"
+    $script:CpcvDefaultConfigPath
 }
 
-function Get-ImgPasteConfigPath { return $script:ImgPasteConfigPath }
+function Get-CpcvConfigPath { return $script:CpcvConfigPath }
 
-function New-ImgPasteDefaultConfig {
+function New-CpcvDefaultConfig {
     $localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
-    $dataRoot = Join-Path $localAppData "imgpaste"
+    $dataRoot = Join-Path $localAppData "cpcv"
     return [ordered]@{
         HostAlias             = ""
         RemoteDir             = "clipboard-images"
@@ -38,7 +39,7 @@ function New-ImgPasteDefaultConfig {
     }
 }
 
-function ConvertTo-ImgPasteStrictInteger {
+function ConvertTo-CpcvStrictInteger {
     param([AllowNull()]$Value)
 
     # Do not rely on PowerShell's permissive casts here.  Values such as a
@@ -60,7 +61,7 @@ function ConvertTo-ImgPasteStrictInteger {
     return [pscustomobject]@{ IsValid = $false; Value = 0 }
 }
 
-function Test-ImgPasteConfigValue {
+function Test-CpcvConfigValue {
     param([System.Collections.IDictionary]$Config)
     if ($Config.HostAlias -isnot [string] -or [string]::IsNullOrWhiteSpace($Config.HostAlias)) { return "HostAlias is required. Configure an SSH alias or user@host." }
     if ($Config.HostAlias -notmatch '^[A-Za-z0-9][A-Za-z0-9._@:-]*$') { return "HostAlias contains unsupported characters." }
@@ -85,7 +86,7 @@ function Test-ImgPasteConfigValue {
         @{ Name = "MaxCacheBytes"; Minimum = 8388608; Maximum = 1073741824 },
         @{ Name = "MaxImageBytes"; Minimum = 1048576; Maximum = 268435456 }
     )) {
-        $converted = ConvertTo-ImgPasteStrictInteger -Value $Config[$rule.Name]
+        $converted = ConvertTo-CpcvStrictInteger -Value $Config[$rule.Name]
         if (-not $converted.IsValid) { return "$($rule.Name) must be a whole number." }
         $numeric[$rule.Name] = $converted.Value
         if ($converted.Value -lt $rule.Minimum -or $converted.Value -gt $rule.Maximum) {
@@ -106,36 +107,36 @@ function Test-ImgPasteConfigValue {
     return ""
 }
 
-function Get-ImgPasteConfig {
-    $cfg = New-ImgPasteDefaultConfig
+function Get-CpcvConfig {
+    $cfg = New-CpcvDefaultConfig
     $allowed = @("HostAlias", "RemoteDir", "RemoteHome", "DataRoot", "CommandTimeoutSeconds", "MaxCommandOutputBytes", "PollIntervalSeconds", "WatchdogCheckSeconds", "WatchdogStaleSeconds", "MaxLogBytes", "MaxCacheFiles", "MaxCacheBytes", "MaxImageBytes")
-    if (Test-Path -LiteralPath $script:ImgPasteConfigPath) {
+    if (Test-Path -LiteralPath $script:CpcvConfigPath) {
         try {
-            $loaded = Import-PowerShellDataFile -LiteralPath $script:ImgPasteConfigPath
+            $loaded = Import-PowerShellDataFile -LiteralPath $script:CpcvConfigPath
             foreach ($key in $allowed) {
                 if ($loaded.ContainsKey($key) -and $null -ne $loaded[$key]) { $cfg[$key] = $loaded[$key] }
             }
         }
         catch {
-            $cfg.ConfigError = "Cannot read configuration '$script:ImgPasteConfigPath': $($_.Exception.Message)"
+            $cfg.ConfigError = "Cannot read configuration '$script:CpcvConfigPath': $($_.Exception.Message)"
             return $cfg
         }
     }
     else {
-        $cfg.ConfigError = "Configuration not found at '$script:ImgPasteConfigPath'. Copy imgpaste.config.example.psd1 there and set HostAlias."
+        $cfg.ConfigError = "Configuration not found at '$script:CpcvConfigPath'. Copy cpcv.config.example.psd1 there and set HostAlias."
         return $cfg
     }
 
     # Environment variables make automation and CI configuration possible without
     # storing a host name in the checkout. They intentionally override the file.
-    if ($env:IMGPASTE_HOST_ALIAS) { $cfg.HostAlias = $env:IMGPASTE_HOST_ALIAS }
-    if ($env:IMGPASTE_REMOTE_DIR) { $cfg.RemoteDir = $env:IMGPASTE_REMOTE_DIR }
-    if ($env:IMGPASTE_REMOTE_HOME) { $cfg.RemoteHome = $env:IMGPASTE_REMOTE_HOME }
+    if ($env:CPCV_HOST_ALIAS) { $cfg.HostAlias = $env:CPCV_HOST_ALIAS }
+    if ($env:CPCV_REMOTE_DIR) { $cfg.RemoteDir = $env:CPCV_REMOTE_DIR }
+    if ($env:CPCV_REMOTE_HOME) { $cfg.RemoteHome = $env:CPCV_REMOTE_HOME }
 
-    $cfg.ConfigError = Test-ImgPasteConfigValue -Config $cfg
+    $cfg.ConfigError = Test-CpcvConfigValue -Config $cfg
     if ($cfg.ConfigError) { return $cfg }
     foreach ($name in @("CommandTimeoutSeconds", "MaxCommandOutputBytes", "PollIntervalSeconds", "WatchdogCheckSeconds", "WatchdogStaleSeconds", "MaxLogBytes", "MaxCacheFiles", "MaxCacheBytes", "MaxImageBytes")) {
-        $cfg[$name] = (ConvertTo-ImgPasteStrictInteger -Value $cfg[$name]).Value
+        $cfg[$name] = (ConvertTo-CpcvStrictInteger -Value $cfg[$name]).Value
     }
     $cfg.LocalCache = Join-Path $cfg.DataRoot "cache"
     $cfg.StateFile = Join-Path $cfg.DataRoot "last-hash.txt"
@@ -145,20 +146,20 @@ function Get-ImgPasteConfig {
     return $cfg
 }
 
-$script:ImgPasteConfig = Get-ImgPasteConfig
+$script:CpcvConfig = Get-CpcvConfig
 
-if (-not ("ImgPasteBoundedOutput" -as [type])) {
+if (-not ("CpcvBoundedOutput" -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 
-public sealed class ImgPasteBoundedOutput {
+public sealed class CpcvBoundedOutput {
     private readonly int limit;
     private readonly StringBuilder text = new StringBuilder();
     private bool truncated;
-    public ImgPasteBoundedOutput(int limit) { this.limit = limit; }
+    public CpcvBoundedOutput(int limit) { this.limit = limit; }
     public async Task PumpAsync(StreamReader reader) {
         char[] buffer = new char[4096];
         int count;
@@ -176,23 +177,23 @@ public sealed class ImgPasteBoundedOutput {
 '@
 }
 
-function Write-ImgPasteLog {
+function Write-CpcvLog {
     param([string]$Message)
-    $safeMessage = (Protect-ImgPasteLogDetail $Message) -replace '[\r\n]+', ' | '
-    $outputLimit = ConvertTo-ImgPasteStrictInteger -Value $script:ImgPasteConfig.MaxCommandOutputBytes
+    $safeMessage = (Protect-CpcvLogDetail $Message) -replace '[\r\n]+', ' | '
+    $outputLimit = ConvertTo-CpcvStrictInteger -Value $script:CpcvConfig.MaxCommandOutputBytes
     $maxDetailChars = if ($outputLimit.IsValid) { [Math]::Min(65536, [Math]::Max(1024, $outputLimit.Value)) } else { 65536 }
     if ($safeMessage.Length -gt $maxDetailChars) {
         $safeMessage = $safeMessage.Substring(0, $maxDetailChars) + " [message truncated]"
     }
     $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $safeMessage
-    $dir = Split-Path $script:ImgPasteConfig.LogFile
+    $dir = Split-Path $script:CpcvConfig.LogFile
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-    Rotate-ImgPasteLog
-    Add-Content -LiteralPath $script:ImgPasteConfig.LogFile -Value $line -ErrorAction SilentlyContinue
+    Rotate-CpcvLog
+    Add-Content -LiteralPath $script:CpcvConfig.LogFile -Value $line -ErrorAction SilentlyContinue
 }
 
-function Rotate-ImgPasteLog {
-    $cfg = $script:ImgPasteConfig
+function Rotate-CpcvLog {
+    $cfg = $script:CpcvConfig
     $path = $cfg.LogFile
     try {
         if (-not (Test-Path $path) -or (Get-Item -LiteralPath $path).Length -lt [int64]$cfg.MaxLogBytes) { return }
@@ -206,7 +207,7 @@ function Rotate-ImgPasteLog {
     catch { }
 }
 
-function Set-ImgPasteAtomicText {
+function Set-CpcvAtomicText {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Value)
     $directory = Split-Path $Path
     if (-not (Test-Path $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
@@ -224,10 +225,10 @@ function Set-ImgPasteAtomicText {
     }
 }
 
-function Prune-ImgPasteCache {
+function Prune-CpcvCache {
     param([string[]]$KeepPath = @())
 
-    $cfg = $script:ImgPasteConfig
+    $cfg = $script:CpcvConfig
     if (-not (Test-Path $cfg.LocalCache)) { return }
     try {
         $keep = @{}
@@ -258,15 +259,15 @@ function Prune-ImgPasteCache {
     catch { }
 }
 
-function Update-ImgPasteHeartbeat {
+function Update-CpcvHeartbeat {
     param([string]$Status = "running")
-    $cfg = $script:ImgPasteConfig
+    $cfg = $script:CpcvConfig
     $dir = Split-Path $cfg.HeartbeatFile
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-    try { Set-ImgPasteAtomicText -Path $cfg.HeartbeatFile -Value ("{0} pid={1} {2}" -f (Get-Date).ToString("o"), $PID, $Status) } catch { }
+    try { Set-CpcvAtomicText -Path $cfg.HeartbeatFile -Value ("{0} pid={1} {2}" -f (Get-Date).ToString("o"), $PID, $Status) } catch { }
 }
 
-function Get-ImgPasteHeartbeatInfo {
+function Get-CpcvHeartbeatInfo {
     param([Parameter(Mandatory)][string]$Path)
 
     try {
@@ -283,13 +284,13 @@ function Get-ImgPasteHeartbeatInfo {
     catch { return $null }
 }
 
-function Test-ImgPasteHeartbeat {
+function Test-CpcvHeartbeat {
     param([Parameter(Mandatory)][string]$Path, [int]$ExpectedProcessId = 0)
-    $info = Get-ImgPasteHeartbeatInfo -Path $Path
+    $info = Get-CpcvHeartbeatInfo -Path $Path
     return ($null -ne $info -and ($ExpectedProcessId -eq 0 -or $info.ProcessId -eq $ExpectedProcessId))
 }
 
-function Protect-ImgPasteLogDetail {
+function Protect-CpcvLogDetail {
     param([AllowNull()][string]$Detail)
     if ([string]::IsNullOrEmpty($Detail)) { return "" }
     $safe = $Detail -replace '(?i)https?://[^\s?]+\?[^\s]+', '[redacted URL query]'
@@ -300,31 +301,31 @@ function Protect-ImgPasteLogDetail {
     return ($safe -replace '(?i)\bBearer\s+[^\s,;]+', 'Bearer [REDACTED]')
 }
 
-function Sanitize-ImgPasteLog {
-    $path = $script:ImgPasteConfig.LogFile
+function Sanitize-CpcvLog {
+    $path = $script:CpcvConfig.LogFile
     if (-not (Test-Path $path)) { return }
     try {
         $original = Get-Content -Raw -LiteralPath $path -ErrorAction Stop
-        $safe = Protect-ImgPasteLogDetail $original
+        $safe = Protect-CpcvLogDetail $original
         if ($safe -cne $original) { Set-Content -LiteralPath $path -Value $safe -NoNewline -ErrorAction Stop }
     }
     catch { }
 }
 
-function Get-ImgPasteRetryDelay {
-    param([int]$FailureCount, [int]$IntervalSeconds = $script:ImgPasteConfig.PollIntervalSeconds)
+function Get-CpcvRetryDelay {
+    param([int]$FailureCount, [int]$IntervalSeconds = $script:CpcvConfig.PollIntervalSeconds)
     if ($FailureCount -le 0) { return $IntervalSeconds }
     return [Math]::Min(60, $IntervalSeconds * [Math]::Pow(2, [Math]::Min($FailureCount, 5)))
 }
 
-function Get-ImgPasteMutexName {
+function Get-CpcvMutexName {
     param([Parameter(Mandatory)][string]$Purpose)
     try { $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value } catch { $identity = "$env:USERDOMAIN-$env:USERNAME" }
     $safeIdentity = ($identity -replace '[^A-Za-z0-9._-]', '_')
-    return "Local\ImgPaste-$Purpose-$safeIdentity"
+    return "Local\Cpcv-$Purpose-$safeIdentity"
 }
 
-function Test-ImgPasteProcessCommandLineForScript {
+function Test-CpcvProcessCommandLineForScript {
     param(
         [AllowNull()][string]$CommandLine,
         [Parameter(Mandatory)][string]$ScriptPath
@@ -342,45 +343,38 @@ function Test-ImgPasteProcessCommandLineForScript {
     return [regex]::IsMatch($CommandLine, $pattern)
 }
 
-function ConvertTo-ImgPasteNormalizedText {
+function ConvertTo-CpcvNormalizedText {
     param([AllowNull()][string]$Value)
     if ($null -eq $Value) { return "" }
     return (($Value -replace "`r`n", "`n").TrimEnd([char[]]"`r`n"))
 }
 
-function Test-ImgPasteCommandWrapperOwnership {
+function Test-CpcvCommandWrapperOwnership {
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$ExpectedContent,
-        [string]$LegacyContent = ""
+        [Parameter(Mandatory)][string]$ExpectedContent
     )
 
     # A user-level command filename is shared across checkouts. Match the
     # whole bounded wrapper, including its managed marker/current script path,
-    # before replacing or removing it. A precisely matching pre-marker wrapper
-    # is accepted once so an existing installation can migrate safely.
+    # before replacing or removing it.
     try {
         if (-not (Test-Path -LiteralPath $Path)) { return $true }
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or $item.Length -gt 16384) { return $false }
-        $actual = ConvertTo-ImgPasteNormalizedText (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
-        $expected = ConvertTo-ImgPasteNormalizedText $ExpectedContent
-        if ($actual -ceq $expected) { return $true }
-        if ($LegacyContent) {
-            return ($actual -ceq (ConvertTo-ImgPasteNormalizedText $LegacyContent))
-        }
-        return $false
+        $actual = ConvertTo-CpcvNormalizedText (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
+        $expected = ConvertTo-CpcvNormalizedText $ExpectedContent
+        return ($actual -ceq $expected)
     }
     catch { return $false }
 }
 
-function Test-ImgPasteShortcutOwnership {
+function Test-CpcvShortcutOwnership {
     param(
         [Parameter(Mandatory)][string]$ShortcutPath,
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][string]$WorkingDirectory,
-        [Parameter(Mandatory)][string]$Description,
-        [string]$LegacyDescriptionPattern = ""
+        [Parameter(Mandatory)][string]$Description
     )
 
     try {
@@ -393,41 +387,40 @@ function Test-ImgPasteShortcutOwnership {
         $actualTarget = [IO.Path]::GetFullPath([string]$shortcut.TargetPath)
         $expectedDirectory = [IO.Path]::GetFullPath($WorkingDirectory).TrimEnd('\\')
         $actualDirectory = if ($shortcut.WorkingDirectory) { [IO.Path]::GetFullPath([string]$shortcut.WorkingDirectory).TrimEnd('\\') } else { "" }
-        $descriptionMatches = ([string]$shortcut.Description -ceq $Description) -or
-            ($LegacyDescriptionPattern -and ([string]$shortcut.Description -like $LegacyDescriptionPattern))
         return ($actualTarget -ieq $expectedTarget -and
-            (Test-ImgPasteProcessCommandLineForScript -CommandLine ([string]$shortcut.Arguments) -ScriptPath $ScriptPath) -and
-            $actualDirectory -eq $expectedDirectory -and $descriptionMatches)
+            (Test-CpcvProcessCommandLineForScript -CommandLine ([string]$shortcut.Arguments) -ScriptPath $ScriptPath) -and
+            $actualDirectory -eq $expectedDirectory -and
+            ([string]$shortcut.Description -ceq $Description))
     }
     catch { return $false }
 }
 
-function Get-ImgPasteRemotePath {
+function Get-CpcvRemotePath {
     param([Parameter(Mandatory)][string]$LeafName)
-    $cfg = $script:ImgPasteConfig
+    $cfg = $script:CpcvConfig
     $relativePath = "$($cfg.RemoteDir.Trim('/'))/$LeafName"
     if ($cfg.RemoteHome) { return "$($cfg.RemoteHome.TrimEnd('/'))/$relativePath" }
     return "~/$relativePath"
 }
 
-function Test-ImgPasteRemotePath {
+function Test-CpcvRemotePath {
     param([AllowNull()][string]$Path)
     return ($Path -and $Path.Length -lt 4096 -and $Path -match '^(~|/)[A-Za-z0-9._/-]+$')
 }
 
-function Get-ImgPasteLastRemotePath {
-    $cfg = $script:ImgPasteConfig
+function Get-CpcvLastRemotePath {
+    $cfg = $script:CpcvConfig
     if (Test-Path $cfg.LastRemotePathFile) {
         try {
             $path = (Get-Content -Raw -LiteralPath $cfg.LastRemotePathFile -ErrorAction Stop).Trim()
-            if (Test-ImgPasteRemotePath $path) { return $path }
+            if (Test-CpcvRemotePath $path) { return $path }
         }
         catch { }
     }
-    return Get-ImgPasteRemotePath -LeafName "latest.png"
+    return Get-CpcvRemotePath -LeafName "latest.png"
 }
 
-function ConvertTo-ImgPasteCommandArgument {
+function ConvertTo-CpcvCommandArgument {
     param([AllowNull()][string]$Value)
     if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
     if ($Value -notmatch '[\s"]') { return $Value }
@@ -436,24 +429,24 @@ function ConvertTo-ImgPasteCommandArgument {
     return '"' + $escaped + '"'
 }
 
-function Stop-ImgPasteProcessTree {
+function Stop-CpcvProcessTree {
     param([int]$ProcessId)
     # SSH ProxyCommand processes are children of ssh; kill the whole tree.
     try { & taskkill.exe /PID $ProcessId /T /F 2>$null | Out-Null } catch {}
     try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch {}
 }
 
-function Invoke-ImgPasteProcess {
+function Invoke-CpcvProcess {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string[]]$Arguments = @(),
-        [int]$TimeoutSeconds = $script:ImgPasteConfig.CommandTimeoutSeconds,
+        [int]$TimeoutSeconds = $script:CpcvConfig.CommandTimeoutSeconds,
         [string]$Label = $FilePath
     )
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
-    $psi.Arguments = (($Arguments | ForEach-Object { ConvertTo-ImgPasteCommandArgument $_ }) -join ' ')
+    $psi.Arguments = (($Arguments | ForEach-Object { ConvertTo-CpcvCommandArgument $_ }) -join ' ')
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
@@ -463,18 +456,18 @@ function Invoke-ImgPasteProcess {
     $process.StartInfo = $psi
     try {
         if (-not $process.Start()) { throw "Process did not start" }
-        $limit = [int]$script:ImgPasteConfig.MaxCommandOutputBytes
-        $stdoutSink = New-Object -TypeName ImgPasteBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
-        $stderrSink = New-Object -TypeName ImgPasteBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
+        $limit = [int]$script:CpcvConfig.MaxCommandOutputBytes
+        $stdoutSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
+        $stderrSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
         $stdoutTask = $stdoutSink.PumpAsync($process.StandardOutput)
         $stderrTask = $stderrSink.PumpAsync($process.StandardError)
         $exited = $process.WaitForExit([Math]::Max(1, $TimeoutSeconds) * 1000)
         if (-not $exited) {
-            Stop-ImgPasteProcessTree -ProcessId $process.Id
+            Stop-CpcvProcessTree -ProcessId $process.Id
             $process.WaitForExit(5000) | Out-Null
             $stdoutTask.Wait(2000) | Out-Null
             $stderrTask.Wait(2000) | Out-Null
-            Write-ImgPasteLog "command timed out after ${TimeoutSeconds}s ($Label), pid=$($process.Id); killed process tree"
+            Write-CpcvLog "command timed out after ${TimeoutSeconds}s ($Label), pid=$($process.Id); killed process tree"
             return @{ Ok = $false; TimedOut = $true; ExitCode = $null; StdOut = $stdoutSink.Text; StdErr = $stderrSink.Text; OutputTruncated = ($stdoutSink.Truncated -or $stderrSink.Truncated); Detail = "Timed out after ${TimeoutSeconds}s; killed process tree." }
         }
 
@@ -509,7 +502,7 @@ function Get-BytesHash {
     finally { $sha.Dispose() }
 }
 
-function Test-ImgPasteClipboardHash {
+function Test-CpcvClipboardHash {
     param([Parameter(Mandatory)][string]$ExpectedHash)
 
     # Checking again immediately before committing latest state keeps an upload
@@ -527,30 +520,30 @@ function Publish-ClipboardImage {
 
     # A hotkey and the watcher can fire together. Serialize the whole upload so
     # they never race over local state or publish conflicting latest links.
-    $mutex = New-Object System.Threading.Mutex($false, (Get-ImgPasteMutexName -Purpose "Upload"))
-    if (-not $mutex.WaitOne(0, $false)) { return @{ Ok = $false; Reason = "upload-in-progress"; Detail = "Another imgpaste upload is active." } }
-    try { return Invoke-ImgPasteClipboardUpload -CopyPath:$CopyPath -Force:$Force }
+    $mutex = New-Object System.Threading.Mutex($false, (Get-CpcvMutexName -Purpose "Upload"))
+    if (-not $mutex.WaitOne(0, $false)) { return @{ Ok = $false; Reason = "upload-in-progress"; Detail = "Another cpcv upload is active." } }
+    try { return Invoke-CpcvClipboardUpload -CopyPath:$CopyPath -Force:$Force }
     finally { $mutex.ReleaseMutex() | Out-Null; $mutex.Dispose() }
 }
 
-function Invoke-ImgPasteClipboardUpload {
+function Invoke-CpcvClipboardUpload {
     param([switch]$CopyPath, [switch]$Force)
 
-    $cfg = $script:ImgPasteConfig
+    $cfg = $script:CpcvConfig
     if ($cfg.ConfigError) { return @{ Ok = $false; Reason = "configuration-invalid"; Detail = $cfg.ConfigError } }
     if (-not (Test-Path $cfg.LocalCache)) { New-Item -ItemType Directory -Force -Path $cfg.LocalCache | Out-Null }
     $bytes = Get-ClipboardImageBytes
     if ($null -eq $bytes -or $bytes.Length -eq 0) { return @{ Ok = $false; Reason = "no-image" } }
     if ([int64]$bytes.Length -gt [int64]$cfg.MaxImageBytes) {
         $detail = "Clipboard image is $($bytes.Length) bytes; MaxImageBytes is $($cfg.MaxImageBytes)."
-        Write-ImgPasteLog "upload rejected: $detail"
+        Write-CpcvLog "upload rejected: $detail"
         return @{ Ok = $false; Reason = "image-too-large"; Detail = $detail }
     }
 
     $hash = Get-BytesHash -Bytes $bytes
     $last = if (Test-Path $cfg.StateFile) { (Get-Content -Raw -LiteralPath $cfg.StateFile).Trim() } else { "" }
     if (-not $Force -and $hash -eq $last -and (Test-Path (Join-Path $cfg.LocalCache "latest.png"))) {
-        $remotePath = Get-ImgPasteLastRemotePath
+        $remotePath = Get-CpcvLastRemotePath
         if ($CopyPath) { Set-Clipboard -Value $remotePath }
         return @{ Ok = $true; Reason = "unchanged"; RemotePath = $remotePath; Hash = $hash }
     }
@@ -559,65 +552,65 @@ function Invoke-ImgPasteClipboardUpload {
     # instead of producing one timestamped PNG per failed poll.
     $localFile = Join-Path $cfg.LocalCache "clip-$hash.png"
     $latestLocal = Join-Path $cfg.LocalCache "latest.png"
-    Prune-ImgPasteCache -KeepPath $localFile
+    Prune-CpcvCache -KeepPath $localFile
     [System.IO.File]::WriteAllBytes($localFile, $bytes)
-    Prune-ImgPasteCache -KeepPath $localFile
+    Prune-CpcvCache -KeepPath $localFile
 
     $hostAlias = $cfg.HostAlias
     $remoteDir = $cfg.RemoteDir.Trim('/')
     $base = [IO.Path]::GetFileName($localFile)
     $sshOpts = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ConnectionAttempts=1", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2")
 
-    $mkdir = Invoke-ImgPasteProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, "mkdir -p `$HOME/$remoteDir")) -Label "ssh mkdir"
+    $mkdir = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, "mkdir -p `$HOME/$remoteDir")) -Label "ssh mkdir"
     if (-not $mkdir.Ok) {
-        $detail = Protect-ImgPasteLogDetail $mkdir.Detail
-        Write-ImgPasteLog "mkdir failed$($(if ($mkdir.TimedOut) { ' (timeout)' } else { '' })): $detail"
-        Prune-ImgPasteCache -KeepPath $localFile
+        $detail = Protect-CpcvLogDetail $mkdir.Detail
+        Write-CpcvLog "mkdir failed$($(if ($mkdir.TimedOut) { ' (timeout)' } else { '' })): $detail"
+        Prune-CpcvCache -KeepPath $localFile
         return @{ Ok = $false; Reason = if ($mkdir.TimedOut) { "ssh-mkdir-timeout" } else { "ssh-mkdir-failed" }; Detail = $detail }
     }
 
-    $scp = Invoke-ImgPasteProcess -FilePath "scp" -Arguments ($sshOpts + @($localFile, "${hostAlias}:$remoteDir/$base")) -Label "scp upload"
+    $scp = Invoke-CpcvProcess -FilePath "scp" -Arguments ($sshOpts + @($localFile, "${hostAlias}:$remoteDir/$base")) -Label "scp upload"
     if (-not $scp.Ok) {
-        $detail = Protect-ImgPasteLogDetail $scp.Detail
-        Write-ImgPasteLog "scp failed$($(if ($scp.TimedOut) { ' (timeout)' } else { '' })): $detail"
-        Prune-ImgPasteCache -KeepPath $localFile
+        $detail = Protect-CpcvLogDetail $scp.Detail
+        Write-CpcvLog "scp failed$($(if ($scp.TimedOut) { ' (timeout)' } else { '' })): $detail"
+        Prune-CpcvCache -KeepPath $localFile
         return @{ Ok = $false; Reason = if ($scp.TimedOut) { "scp-timeout" } else { "scp-failed" }; Detail = $detail }
     }
 
-    if (-not (Test-ImgPasteClipboardHash -ExpectedHash $hash)) {
+    if (-not (Test-CpcvClipboardHash -ExpectedHash $hash)) {
         $detail = "Clipboard changed before the upload could update latest.png; leaving retry state unchanged."
-        Write-ImgPasteLog "upload superseded: $detail"
-        Prune-ImgPasteCache -KeepPath $localFile
+        Write-CpcvLog "upload superseded: $detail"
+        Prune-CpcvCache -KeepPath $localFile
         return @{ Ok = $false; Reason = "clipboard-changed"; Detail = $detail; Hash = $hash }
     }
 
     $remoteCmd = "ln -sfn $base `$HOME/$remoteDir/latest.png; readlink -f `$HOME/$remoteDir/$base 2>/dev/null || printf '%s\n' `$HOME/$remoteDir/$base"
-    $remote = Invoke-ImgPasteProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, $remoteCmd)) -Label "ssh update latest"
+    $remote = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, $remoteCmd)) -Label "ssh update latest"
     if (-not $remote.Ok) {
-        $detail = Protect-ImgPasteLogDetail $remote.Detail
-        Write-ImgPasteLog "latest-link update failed$($(if ($remote.TimedOut) { ' (timeout)' } else { '' })): $detail"
-        Prune-ImgPasteCache -KeepPath $localFile
+        $detail = Protect-CpcvLogDetail $remote.Detail
+        Write-CpcvLog "latest-link update failed$($(if ($remote.TimedOut) { ' (timeout)' } else { '' })): $detail"
+        Prune-CpcvCache -KeepPath $localFile
         return @{ Ok = $false; Reason = if ($remote.TimedOut) { "ssh-latest-timeout" } else { "ssh-latest-failed" }; Detail = $detail; Hash = $hash }
     }
     $remotePath = ($remote.StdOut -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
     if ($remotePath) { $remotePath = $remotePath.Trim() }
-    if (-not (Test-ImgPasteRemotePath $remotePath)) {
-        if ($remotePath) { Write-ImgPasteLog "remote path response was invalid; using configured fallback" }
-        $remotePath = Get-ImgPasteRemotePath -LeafName $base
+    if (-not (Test-CpcvRemotePath $remotePath)) {
+        if ($remotePath) { Write-CpcvLog "remote path response was invalid; using configured fallback" }
+        $remotePath = Get-CpcvRemotePath -LeafName $base
     }
 
-    if (-not (Test-ImgPasteClipboardHash -ExpectedHash $hash)) {
+    if (-not (Test-CpcvClipboardHash -ExpectedHash $hash)) {
         $detail = "Clipboard changed while the latest link was being updated; leaving retry state unchanged."
-        Write-ImgPasteLog "upload superseded: $detail"
-        Prune-ImgPasteCache -KeepPath $localFile
+        Write-CpcvLog "upload superseded: $detail"
+        Prune-CpcvCache -KeepPath $localFile
         return @{ Ok = $false; Reason = "clipboard-changed"; Detail = $detail; Hash = $hash }
     }
 
     Copy-Item -Force $localFile $latestLocal
-    Set-ImgPasteAtomicText -Path $cfg.StateFile -Value $hash
-    Set-ImgPasteAtomicText -Path $cfg.LastRemotePathFile -Value $remotePath
-    Prune-ImgPasteCache -KeepPath $localFile
-    Write-ImgPasteLog "uploaded $base -> $remotePath ($($bytes.Length) bytes)"
-    if ($CopyPath) { Set-Clipboard -Value $remotePath; Write-ImgPasteLog "clipboard set to path text: $remotePath" }
+    Set-CpcvAtomicText -Path $cfg.StateFile -Value $hash
+    Set-CpcvAtomicText -Path $cfg.LastRemotePathFile -Value $remotePath
+    Prune-CpcvCache -KeepPath $localFile
+    Write-CpcvLog "uploaded $base -> $remotePath ($($bytes.Length) bytes)"
+    if ($CopyPath) { Set-Clipboard -Value $remotePath; Write-CpcvLog "clipboard set to path text: $remotePath" }
     return @{ Ok = $true; Reason = "uploaded"; RemotePath = $remotePath; LocalFile = $localFile; Hash = $hash; Bytes = $bytes.Length }
 }

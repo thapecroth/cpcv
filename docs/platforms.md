@@ -1,6 +1,6 @@
 # Platform support
 
-imgpaste is a private-first, local clipboard-to-SSH utility. It does not need a
+cpcv is a private-first, local clipboard-to-SSH utility. It does not need a
 public repository, a hosted service, a replacement screenshot app, or an
 administrator-installed background service.
 
@@ -23,14 +23,14 @@ checkout.
 
 | Platform | Default private configuration | Example |
 | --- | --- | --- |
-| Windows | `%LOCALAPPDATA%\imgpaste\config.psd1` | `imgpaste.config.example.psd1` |
-| macOS | `~/Library/Application Support/imgpaste/config.json` | `macos/imgpaste.macos.config.example.json` |
+| Windows | `%LOCALAPPDATA%\cpcv\config.psd1` | `cpcv.config.example.psd1` |
+| macOS | `~/Library/Application Support/cpcv/config.json` | `macos/cpcv.macos.config.example.json` |
 
 The macOS parser accepts only JSON data and validates `hostAlias`, relative
 `remoteDir`, optional absolute POSIX `remoteHome`, data-root, size limits,
 timeouts, cache limits, and watchdog timing before launching SSH. A custom
-`IMGPASTE_CONFIG` value must be an absolute local file path. Put credentials
-and `ProxyCommand` rules in your own SSH configuration, never in imgpaste JSON
+`CPCV_CONFIG` value must be an absolute local file path. Put credentials
+and `ProxyCommand` rules in your own SSH configuration, never in cpcv JSON
 or source.
 
 ## macOS lifecycle
@@ -39,8 +39,8 @@ macOS support is source-installed, not a signed application bundle. It requires
 macOS 11 or newer, Xcode Command Line Tools, and a logged-in graphical desktop
 session. It uses only these project-owned user labels:
 
-- `io.imgpaste.guardian` runs the native guardian in `gui/$UID`.
-- `io.imgpaste.tray` runs the optional menu-bar companion in `gui/$UID`.
+- `io.cpcv.guardian` runs the native guardian in `gui/$UID`.
+- `io.cpcv.tray` runs the optional menu-bar companion in `gui/$UID`.
 
 `macos/install-macos.sh` builds the native uploader with `swiftc`, records the
 selected private configuration path, writes a managed LaunchAgent, and starts
@@ -49,10 +49,10 @@ bar companion after the uploader is present. Both reject `sudo`, a missing GUI
 domain, a symlinked target, and an unrelated existing LaunchAgent label.
 The guardian and optional tray have a fixed PATH containing standard system
 locations plus the Apple Silicon and Intel Homebrew locations, so an SSH
-`ProxyCommand` can use tools such as `cloudflared` when imgpaste runs in the
+`ProxyCommand` can use tools such as `cloudflared` when cpcv runs in the
 background.
 
-Use `macos/imgpaste-macos-ctl.sh` for fixed local actions only:
+Use `macos/cpcv-macos-ctl.sh` for fixed local actions only:
 
 ```text
 status | start | stop | restart | logs | upload | config | settings-read | settings-save | doctor
@@ -67,9 +67,9 @@ default.
 
 The tray is a local status/control client, never a second uploader.
 
-- Windows uses a current-user `Local\ImgPaste-Tray-*` mutex; a duplicate
+- Windows uses a current-user `Local\Cpcv-Tray-*` mutex; a duplicate
   launch exits harmlessly (including a second checkout for the same user).
-- macOS uses a single managed `io.imgpaste.tray` LaunchAgent and calls the
+- macOS uses a single managed `io.cpcv.tray` LaunchAgent and calls the
   project-owned control script with fixed action names.
 
 Both interfaces show bounded, redacted state, copy the last validated remote
@@ -123,25 +123,25 @@ when user-systemd lingering is disabled because services can stop after logout.
 Run the remote test script after an upload to compare the X11 clipboard bytes
 with `latest.png` before testing the Codex TUI manually.
 
-The installed `imgpaste-codex-x11-uninstall` command disables and removes only
+The installed `cpcv-codex-x11-uninstall` command disables and removes only
 the two marked user units, bridge files, Xauthority data, and managed zsh
-block. It preserves uploaded images and the core imgpaste configuration.
+block. It preserves uploaded images and the core cpcv configuration.
 
 ## Optional tmux path paste
 
-`imgpaste.tmux` inserts the configured remote `latest.png` path into the pane
+`cpcv.tmux` inserts the configured remote `latest.png` path into the pane
 that triggered it, using a transient tmux buffer. It does not change an OS
 clipboard. Source the plugin's printed `run-shell` line in a user-owned tmux
 config. Its default capture key is `Ctrl-V`; if that key is already bound,
-imgpaste leaves it unchanged, and `@imgpaste-paste-key` can select an unused
+cpcv leaves it unchanged, and `@cpcv-paste-key` can select an unused
 tmux key before sourcing the plugin. Warp consumes `Cmd-V` and cannot map it
 to a raw control key, so use `Ctrl-V` with Warp.
 
-The plugin appends `imgpaste · 2 sec ago` to tmux's right status area. This is
+The plugin appends `cpcv · 2 sec ago` to tmux's right status area. This is
 the age of `latest.png` on the target server, calculated entirely on that
 server. The first plugin load sets tmux's shared status interval to two seconds
-and later respects a user-managed interval. Set `@imgpaste-status off` to hide it or
-`@imgpaste-status-refresh 5` before sourcing the plugin to change its default
+and later respects a user-managed interval. Set `@cpcv-status off` to hide it or
+`@cpcv-status-refresh 5` before sourcing the plugin to change its default
 refresh interval. The macOS Doctor checks that host and target clocks differ
 by no more than five seconds.
 

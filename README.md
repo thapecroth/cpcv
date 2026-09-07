@@ -1,23 +1,23 @@
-# imgpaste
+# cpcv
 
 > Keep an image on your Mac or Windows clipboard, upload it over SSH, and paste
 > its remote path into the exact tmux pane that needs it.
 
-![Illustration of the imgpaste workflow](assets/imgpaste-workflow.png)
+![Illustration of the cpcv workflow](assets/cpcv-workflow.png)
 
-imgpaste is built around a small, practical tmux workflow:
+cpcv is built around a small, practical tmux workflow:
 
 1. Take a screenshot or copy an image normally.
-2. imgpaste uploads it to your SSH target and updates `latest.png`.
+2. cpcv uploads it to your SSH target and updates `latest.png`.
 3. Press `Ctrl-V` in tmux.
 4. The remote path is inserted only into the active tmux pane.
 
-The local clipboard stays an image. imgpaste never silently replaces it with a
+The local clipboard stays an image. cpcv never silently replaces it with a
 file path or text.
 
 ## Start here: tmux path paste
 
-The remote plugin is the primary way to use imgpaste. It uses a pane-specific,
+The remote plugin is the primary way to use cpcv. It uses a pane-specific,
 transient tmux buffer, so the image path goes only to the pane where you pressed
 the key. It does not use or alter the host clipboard.
 
@@ -36,19 +36,19 @@ bash macos/install-tray.sh
 Then deploy the tmux plugin to the SSH host that receives your images:
 
 ```bash
-bash macos/deploy-remote-tmux-imgpaste-plugin.sh --host image-box
+bash macos/deploy-remote-tmux-cpcv-plugin.sh --host image-box
 ```
 
 On that SSH host, add this one line to your own `~/.tmux.conf`:
 
 ```tmux
-run-shell ~/.local/lib/imgpaste/tmux/imgpaste.tmux
+run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
 ```
 
 Reload an existing tmux server immediately:
 
 ```bash
-tmux run-shell "$HOME/.local/lib/imgpaste/tmux/imgpaste.tmux"
+tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"
 ```
 
 For persistence after editing `~/.tmux.conf`:
@@ -66,10 +66,10 @@ Create a private configuration outside the checkout, then install the watcher
 and deploy the optional tmux files:
 
 ```powershell
-Set-Location imgpaste
-$configDir = Join-Path $env:LOCALAPPDATA 'imgpaste'
+Set-Location cpcv
+$configDir = Join-Path $env:LOCALAPPDATA 'cpcv'
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-Copy-Item .\imgpaste.config.example.psd1 (Join-Path $configDir 'config.psd1')
+Copy-Item .\cpcv.config.example.psd1 (Join-Path $configDir 'config.psd1')
 notepad (Join-Path $configDir 'config.psd1')
 
 # Set HostAlias, then verify normal SSH works.
@@ -85,7 +85,7 @@ with the same `tmux run-shell` command shown above.
 Once loaded, the plugin adds a compact status item on the right side of tmux:
 
 ```text
-imgpaste · 2 sec ago
+cpcv · 2 sec ago
 ```
 
 It is the age of the most recent upload on the SSH target. The calculation uses
@@ -99,17 +99,17 @@ setting before the plugin's `run-shell` line if you want to change it:
 
 ```tmux
 # Hide the status item.
-set -g @imgpaste-status off
+set -g @cpcv-status off
 
 # Keep it visible but refresh every five seconds.
-set -g @imgpaste-status-refresh 5
+set -g @cpcv-status-refresh 5
 ```
 
-If `Ctrl-V` is already used by your tmux configuration, imgpaste leaves that
+If `Ctrl-V` is already used by your tmux configuration, cpcv leaves that
 binding alone. Pick another tmux key before the `run-shell` line:
 
 ```tmux
-set -g @imgpaste-paste-key M-v
+set -g @cpcv-paste-key M-v
 ```
 
 ### About Command-V
@@ -122,7 +122,7 @@ mapping; only enable one if it sends `Ctrl-V` while the tmux pane is focused.
 
 ## Everyday workflow
 
-| You do | imgpaste does |
+| You do | cpcv does |
 | --- | --- |
 | Screenshot or copy an image | Leaves the image on the local clipboard. |
 | Wait for automatic upload | Stores a timestamped image remotely and advances `latest.png`. |
@@ -136,11 +136,11 @@ cloud service, a screenshot replacement, GitHub, or a remote agent.
 
 ## Changing your target
 
-On macOS, open the imgpaste menu-bar icon and choose **Settings…**. Change the
+On macOS, open the cpcv menu-bar icon and choose **Settings…**. Change the
 SSH target or remote folder, save, then deploy the tmux plugin to that new host:
 
 ```bash
-bash macos/deploy-remote-tmux-imgpaste-plugin.sh --host new-image-box
+bash macos/deploy-remote-tmux-cpcv-plugin.sh --host new-image-box
 ```
 
 Load the plugin in that host's tmux server as shown above. Saving Settings
@@ -158,26 +158,26 @@ empty diagnostic log is normal when there have been no failures.
 The command-line checks are useful too:
 
 ```bash
-bash macos/imgpaste-macos-ctl.sh status
-bash macos/imgpaste-macos-ctl.sh doctor
-bash macos/imgpaste-macos-ctl.sh logs
+bash macos/cpcv-macos-ctl.sh status
+bash macos/cpcv-macos-ctl.sh doctor
+bash macos/cpcv-macos-ctl.sh logs
 ```
 
 `doctor` verifies the local service, SSH reachability, remote directory, clock
 synchronization, and any already-installed optional Codex bridge. It repairs
-only imgpaste-owned components.
+only cpcv-owned components.
 
 On the SSH target, inspect the plugin and status label directly:
 
 ```bash
-tmux list-keys -T root | grep IMGPASTE_TMUX_PLUGIN
-~/.local/lib/imgpaste/tmux/tmux/scripts/imgpaste-tmux-status.sh
+tmux list-keys -T root | grep CPCV_TMUX_PLUGIN
+~/.local/lib/cpcv/tmux/tmux/scripts/cpcv-tmux-status.sh
 ```
 
 If `Ctrl-V` does nothing, first load the plugin into the running server again:
 
 ```bash
-tmux run-shell "$HOME/.local/lib/imgpaste/tmux/imgpaste.tmux"
+tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"
 ```
 
 If the status says `no image`, copy an image locally and wait for the upload to
@@ -195,8 +195,8 @@ Keep configuration private and outside the checkout:
 
 | Platform | Default private configuration |
 | --- | --- |
-| macOS | `~/Library/Application Support/imgpaste/config.json` |
-| Windows | `%LOCALAPPDATA%\imgpaste\config.psd1` |
+| macOS | `~/Library/Application Support/cpcv/config.json` |
+| Windows | `%LOCALAPPDATA%\cpcv\config.psd1` |
 
 The essential settings are an SSH alias/host, a relative remote directory, an
 optional remote home, and an upload interval. Use the macOS Settings UI or the
@@ -204,7 +204,7 @@ provided private configuration examples. Full field descriptions and platform
 details are in [docs/platforms.md](docs/platforms.md).
 
 An SSH alias keeps usernames, keys, proxy settings, and host verification out
-of imgpaste configuration:
+of cpcv configuration:
 
 ```sshconfig
 Host image-box
@@ -220,7 +220,7 @@ Host image-box
 - SSH/SCP commands have hard timeouts and bounded, redacted diagnostic output.
 - Guardians restart only their matching local watcher; macOS uses per-user
   LaunchAgents and never requires `sudo`.
-- Remote installation writes only marked imgpaste plugin files. It does not
+- Remote installation writes only marked cpcv plugin files. It does not
   edit shell startup files, `PATH`, or your tmux configuration.
 - Local image caches, logs, and state can contain sensitive data. Retention is
   bounded, but choose your own backup and privacy policy.
@@ -233,7 +233,7 @@ clipboard, the optional bridge creates a private per-user Xvfb/X11 clipboard:
 
 ```bash
 bash macos/deploy-remote-codex-x11-bridge.sh --host image-box
-ssh image-box '~/.local/lib/imgpaste/imgpaste-codex-x11-test'
+ssh image-box '~/.local/lib/cpcv/cpcv-codex-x11-test'
 ```
 
 It does not replace global `xclip` or `wl-paste`. See
@@ -253,8 +253,8 @@ After updating the remote plugin source, redeploy it and reload the active tmux
 server:
 
 ```bash
-bash macos/deploy-remote-tmux-imgpaste-plugin.sh --host image-box
-ssh image-box 'tmux run-shell "$HOME/.local/lib/imgpaste/tmux/imgpaste.tmux"'
+bash macos/deploy-remote-tmux-cpcv-plugin.sh --host image-box
+ssh image-box 'tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"'
 ```
 
 Uninstallers preserve your configuration, cached images, and remote images
@@ -274,7 +274,7 @@ bash macos/uninstall-macos.sh
 
 ```bash
 bash macos/test-macos.sh
-bash tests/test-tmux-imgpaste.sh
+bash tests/test-tmux-cpcv.sh
 ```
 
 Windows tests are documented in [docs/testing-and-ci.md](docs/testing-and-ci.md).
@@ -282,4 +282,4 @@ For security, releases, and private-fork guidance, see [SECURITY.md](SECURITY.md
 [CONTRIBUTING.md](CONTRIBUTING.md), and
 [docs/private-release-mirror.md](docs/private-release-mirror.md).
 
-imgpaste is licensed under the [MIT License](LICENSE).
+cpcv is licensed under the [MIT License](LICENSE).

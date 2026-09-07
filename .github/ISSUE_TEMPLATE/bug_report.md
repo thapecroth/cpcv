@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible imgpaste problem
+about: Report a reproducible cpcv problem
 title: "bug: "
 labels: bug
 assignees: ''
@@ -14,7 +14,7 @@ assignees: ''
 
 - Windows version:
 - PowerShell version:
-- imgpaste version/commit:
+- cpcv version/commit:
 - SSH target type (alias/hostname/user@host; redact the actual value):
 
 ## Steps to reproduce

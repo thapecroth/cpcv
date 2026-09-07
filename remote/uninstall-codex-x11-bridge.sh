@@ -3,12 +3,12 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-readonly display_unit='io.imgpaste.codex-x11.service'
-readonly bridge_unit='io.imgpaste.codex-x11-bridge.service'
-readonly marker='# Managed by imgpaste install-codex-x11-bridge.sh'
+readonly display_unit='io.cpcv.codex-x11.service'
+readonly bridge_unit='io.cpcv.codex-x11-bridge.service'
+readonly marker='# Managed by cpcv install-codex-x11-bridge.sh'
 
 die() {
-  printf 'imgpaste Codex X11 uninstall: %s\n' "$*" >&2
+  printf 'cpcv Codex X11 uninstall: %s\n' "$*" >&2
   exit 1
 }
 
@@ -94,15 +94,15 @@ remove_zsh_block() {
   [[ ! -L "$zshrc" ]] || die "Refusing symlinked zshrc: $zshrc"
   [[ -e "$zshrc" ]] || return 0
   [[ -f "$zshrc" ]] || die "Refusing to modify non-regular zshrc: $zshrc"
-  starts=$(grep -Fxc '# >>> imgpaste Codex X11 >>>' "$zshrc" || true)
-  ends=$(grep -Fxc '# <<< imgpaste Codex X11 <<<' "$zshrc" || true)
-  [[ "$starts" == "$ends" && "$starts" -le 1 ]] || die 'Refusing malformed imgpaste Codex X11 zshrc markers.'
+  starts=$(grep -Fxc '# >>> cpcv Codex X11 >>>' "$zshrc" || true)
+  ends=$(grep -Fxc '# <<< cpcv Codex X11 <<<' "$zshrc" || true)
+  [[ "$starts" == "$ends" && "$starts" -le 1 ]] || die 'Refusing malformed cpcv Codex X11 zshrc markers.'
   [[ "$starts" == 1 ]] || return 0
   mode=$(stat -c '%a' "$zshrc")
   temporary=$(mktemp "${zshrc%/*}/.${zshrc##*/}.XXXXXX")
   awk '
-    /^# >>> imgpaste Codex X11 >>>$/ { dropping = 1; next }
-    /^# <<< imgpaste Codex X11 <<<$/{ dropping = 0; next }
+    /^# >>> cpcv Codex X11 >>>$/ { dropping = 1; next }
+    /^# <<< cpcv Codex X11 <<<$/{ dropping = 0; next }
     !dropping { print }
   ' "$zshrc" > "$temporary"
   chmod "$mode" "$temporary"
@@ -113,16 +113,16 @@ remove_zsh_block() {
 [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || die 'HOME must be a simple absolute POSIX path.'
 
 unit_dir="$HOME/.config/systemd/user"
-library_dir="$HOME/.local/lib/imgpaste"
-config_dir="$HOME/.config/imgpaste"
-state_dir="$HOME/.local/state/imgpaste/codex-x11"
+library_dir="$HOME/.local/lib/cpcv"
+config_dir="$HOME/.config/cpcv"
+state_dir="$HOME/.local/state/cpcv/codex-x11"
 display_file="$unit_dir/$display_unit"
 bridge_file="$unit_dir/$bridge_unit"
 config="$config_dir/codex-x11.conf"
 authority="$state_dir/Xauthority"
-bridge="$library_dir/imgpaste-codex-x11-bridge"
-test_script="$library_dir/imgpaste-codex-x11-test"
-uninstaller="$library_dir/imgpaste-codex-x11-uninstall"
+bridge="$library_dir/cpcv-codex-x11-bridge"
+test_script="$library_dir/cpcv-codex-x11-test"
+uninstaller="$library_dir/cpcv-codex-x11-uninstall"
 ownership="$state_dir/codex-x11.manifest"
 
 if managed_payload_exists && ! verify_ownership_manifest; then
@@ -156,4 +156,4 @@ for directory in "$state_dir" "$library_dir"; do
   [[ ! -L "$directory" ]] || die "Refusing symlinked managed directory: $directory"
   rmdir "$directory" 2>/dev/null || true
 done
-printf 'Removed imgpaste Codex X11 bridge services and managed shell integration.\n'
+printf 'Removed cpcv Codex X11 bridge services and managed shell integration.\n'

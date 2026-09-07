@@ -101,4 +101,4 @@ jobs:
         shell: bash
         run: |
           bash macos/test-macos.sh
-          bash tests/test-tmux-imgpaste.sh
+          bash tests/test-tmux-cpcv.sh

@@ -3,9 +3,9 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-config_file="${IMGPASTE_X11_CONFIG:-$HOME/.config/imgpaste/codex-x11.conf}"
+config_file="${CPCV_X11_CONFIG:-$HOME/.config/cpcv/codex-x11.conf}"
 [[ -f "$config_file" && ! -L "$config_file" ]] || {
-  printf 'Missing imgpaste Codex X11 configuration: %s\n' "$config_file" >&2
+  printf 'Missing cpcv Codex X11 configuration: %s\n' "$config_file" >&2
   exit 64
 }
 display=''
@@ -25,11 +25,11 @@ done < "$config_file"
 
 while [[ "$image_dir" != '/' && "$image_dir" == */ ]]; do image_dir=${image_dir%/}; done
 [[ "$display" =~ ^:[0-9]+$ && -d "$image_dir" && -f "$authority" ]] || {
-  printf 'Invalid or missing imgpaste Codex X11 configuration.\n' >&2
+  printf 'Invalid or missing cpcv Codex X11 configuration.\n' >&2
   exit 64
 }
-/usr/bin/systemctl --user is-active --quiet io.imgpaste.codex-x11.service
-/usr/bin/systemctl --user is-active --quiet io.imgpaste.codex-x11-bridge.service
+/usr/bin/systemctl --user is-active --quiet io.cpcv.codex-x11.service
+/usr/bin/systemctl --user is-active --quiet io.cpcv.codex-x11-bridge.service
 XAUTHORITY="$authority" DISPLAY="$display" /usr/bin/xdpyinfo >/dev/null
 
 latest="$(readlink -f -- "$image_dir/latest.png" 2>/dev/null || true)"

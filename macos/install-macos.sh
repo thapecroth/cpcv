@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and install the per-user macOS imgpaste guardian.
+# Build and install the per-user macOS cpcv guardian.
 #
 # This installer intentionally uses a LaunchAgent in the current user's GUI
 # launchd domain. It never evaluates configuration as shell code: the native
@@ -9,10 +9,10 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 077
 
-readonly label='io.imgpaste.guardian'
+readonly label='io.cpcv.guardian'
 
 die() {
-  printf 'imgpaste install: %s\n' "$*" >&2
+  printf 'cpcv install: %s\n' "$*" >&2
   exit 1
 }
 
@@ -20,7 +20,7 @@ usage() {
   cat <<'USAGE'
 Usage: ./macos/install-macos.sh [--config /absolute/path/config.json] [--no-start]
 
-Builds macos/imgpaste-macos.swift into macos/build/imgpaste-macos, creates a
+Builds macos/cpcv-macos.swift into macos/build/cpcv-macos, creates a
 private default configuration when needed, and installs a LaunchAgent in the
 current logged-in user's GUI launchd domain. Existing data and configuration
 are never replaced.
@@ -83,10 +83,10 @@ write_plist() {
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      *'__IMGPASTE_EXECUTABLE__'*) printf '    <string>%s</string>\n' "$executable_xml" ;;
-      *'__IMGPASTE_CONFIG__'*) printf '    <string>%s</string>\n' "$config_xml" ;;
-      *'__IMGPASTE_PROJECT_ROOT__'*) printf '  <string>%s</string>\n' "$root_xml" ;;
-      *'__IMGPASTE_LAUNCHD_LOG__'*) printf '  <string>%s</string>\n' "$log_xml" ;;
+      *'__CPCV_EXECUTABLE__'*) printf '    <string>%s</string>\n' "$executable_xml" ;;
+      *'__CPCV_CONFIG__'*) printf '    <string>%s</string>\n' "$config_xml" ;;
+      *'__CPCV_PROJECT_ROOT__'*) printf '  <string>%s</string>\n' "$root_xml" ;;
+      *'__CPCV_LAUNCHD_LOG__'*) printf '  <string>%s</string>\n' "$log_xml" ;;
       *) printf '%s\n' "$line" ;;
     esac
   done < "$template" > "$output"
@@ -95,14 +95,14 @@ write_plist() {
 is_managed_plist() {
   local candidate=$1
   [[ -f "$candidate" && ! -L "$candidate" ]] && \
-    /usr/bin/grep -Fq 'Managed by imgpaste install-macos.sh' "$candidate"
+    /usr/bin/grep -Fq 'Managed by cpcv install-macos.sh' "$candidate"
 }
 
 job_loaded() {
   /bin/launchctl print "$domain/$label" >/dev/null 2>&1
 }
 
-config_override=${IMGPASTE_CONFIG:-}
+config_override=${CPCV_CONFIG:-}
 start_after_install=1
 while (($#)); do
   case "$1" in
@@ -136,13 +136,13 @@ case "$script_path" in
 esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
 project_root=$(CDPATH= cd -P -- "$script_dir/.." && /bin/pwd -P)
-source_file="$script_dir/imgpaste-macos.swift"
-template="$script_dir/io.imgpaste.guardian.plist.template"
-example_config="$script_dir/imgpaste.macos.config.example.json"
+source_file="$script_dir/cpcv-macos.swift"
+template="$script_dir/io.cpcv.guardian.plist.template"
+example_config="$script_dir/cpcv.macos.config.example.json"
 build_dir="$script_dir/build"
-executable="$build_dir/imgpaste-macos"
+executable="$build_dir/cpcv-macos"
 app_support="$home_dir/Library/Application Support"
-state_dir="$app_support/imgpaste"
+state_dir="$app_support/cpcv"
 default_config="$state_dir/config.json"
 config_pointer="$state_dir/launchd-config-path"
 launch_agents="$home_dir/Library/LaunchAgents"
@@ -156,7 +156,7 @@ command -v swiftc >/dev/null 2>&1 || \
   die 'Swift compiler not found. Install Xcode Command Line Tools with: xcode-select --install'
 
 # A label is global within a GUI launchd domain. Do not unload a job merely
-# because it happens to use imgpaste's label; prove this checkout owns the
+# because it happens to use cpcv's label; prove this checkout owns the
 # on-disk plist before replacing or booting out anything.
 [[ ! -L "$launch_agents" ]] || die "Refusing symlinked LaunchAgents directory: $launch_agents"
 existing_managed_plist=0
@@ -175,7 +175,7 @@ fi
 
 if [[ -n "$config_override" ]]; then
   config_file=$(absolute_existing_file "$config_override") || \
-    die 'IMGPASTE_CONFIG/--config must name an existing, non-symlinked absolute JSON file.'
+    die 'CPCV_CONFIG/--config must name an existing, non-symlinked absolute JSON file.'
 else
   if [[ ! -e "$default_config" ]]; then
     /usr/bin/install -m 600 "$example_config" "$default_config"
@@ -199,13 +199,13 @@ trap - EXIT
 /bin/mkdir -p -- "$build_dir"
 /bin/chmod 700 "$build_dir"
 [[ ! -L "$executable" ]] || die "Refusing symlinked executable path: $executable"
-build_tmp=$(/usr/bin/mktemp -d "$build_dir/.imgpaste-build.XXXXXX")
+build_tmp=$(/usr/bin/mktemp -d "$build_dir/.cpcv-build.XXXXXX")
 trap '/bin/rm -rf -- "$build_tmp"' EXIT
-swiftc -O -framework AppKit "$source_file" -o "$build_tmp/imgpaste-macos"
-[[ -x "$build_tmp/imgpaste-macos" ]] || die 'Swift compilation did not produce an executable.'
-"$build_tmp/imgpaste-macos" self-test >/dev/null
-/bin/chmod 700 "$build_tmp/imgpaste-macos"
-/bin/mv -f -- "$build_tmp/imgpaste-macos" "$executable"
+swiftc -O -framework AppKit "$source_file" -o "$build_tmp/cpcv-macos"
+[[ -x "$build_tmp/cpcv-macos" ]] || die 'Swift compilation did not produce an executable.'
+"$build_tmp/cpcv-macos" self-test >/dev/null
+/bin/chmod 700 "$build_tmp/cpcv-macos"
+/bin/mv -f -- "$build_tmp/cpcv-macos" "$executable"
 /bin/rmdir -- "$build_tmp"
 trap - EXIT
 

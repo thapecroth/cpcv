@@ -1,6 +1,6 @@
 # Exercises the real WinForms notification-area API with the checked-in ICO.
 # It runs for only the time needed to create and dispose a private test icon;
-# it does not start the imgpaste tray loop, inspect the uploader, clipboard,
+# it does not start the cpcv tray loop, inspect the uploader, clipboard,
 # SSH, or user Startup integration.
 $ErrorActionPreference = 'Stop'
 
@@ -9,11 +9,11 @@ if ([Threading.Thread]::CurrentThread.ApartmentState -ne [Threading.ApartmentSta
 }
 
 $root = Split-Path $PSScriptRoot -Parent
-. (Join-Path $root 'imgpaste-tray.ps1') -NoRun
+. (Join-Path $root 'cpcv-tray.ps1') -NoRun
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$selection = Get-ImgPasteTrayIcon
+$selection = Get-CpcvTrayIcon
 $notify = $null
 try {
     if ($selection.IsFallback -or -not $selection.OwnsIcon) {
@@ -21,7 +21,7 @@ try {
     }
     $notify = New-Object System.Windows.Forms.NotifyIcon
     $notify.Icon = $selection.Icon
-    $notify.Text = 'imgpaste icon verification'
+    $notify.Text = 'cpcv icon verification'
     $notify.Visible = $true
     [System.Windows.Forms.Application]::DoEvents()
     if (-not $notify.Visible) { throw 'WinForms did not accept the branded tray icon.' }

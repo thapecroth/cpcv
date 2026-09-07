@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local control surface for the native macOS imgpaste uploader.
+# Local control surface for the native macOS cpcv uploader.
 #
 # This script accepts a small fixed action set. It does not parse, source, or
 # evaluate JSON: configuration is handed directly to the project-owned native
@@ -8,18 +8,18 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-readonly label='io.imgpaste.guardian'
+readonly label='io.cpcv.guardian'
 readonly status_capabilities='["status","start","stop","restart","logs","upload","config","settings-read","settings-save","doctor"]'
 readonly recovery_capabilities='["status","config","settings-read","settings-save","doctor"]'
 
 die() {
-  printf 'imgpaste control: %s\n' "$*" >&2
+  printf 'cpcv control: %s\n' "$*" >&2
   exit 1
 }
 
 usage() {
   cat <<'USAGE'
-Usage: ./macos/imgpaste-macos-ctl.sh <action> [arguments]
+Usage: ./macos/cpcv-macos-ctl.sh <action> [arguments]
 
 Actions: status, start, stop, restart, logs, upload, config, doctor,
          settings-read, settings-save
@@ -68,7 +68,7 @@ emit_status() {
 }
 
 resolve_config() {
-  local requested=${IMGPASTE_CONFIG:-} selected=''
+  local requested=${CPCV_CONFIG:-} selected=''
   if [[ -n "$requested" ]]; then
     absolute_existing_file "$requested" || return 1
     return 0
@@ -98,7 +98,7 @@ job_loaded() {
 
 owned_plist() {
   [[ -f "$plist" && ! -L "$plist" ]] && \
-    /usr/bin/grep -Fq 'Managed by imgpaste install-macos.sh' "$plist"
+    /usr/bin/grep -Fq 'Managed by cpcv install-macos.sh' "$plist"
 }
 
 require_owned_plist() {
@@ -147,8 +147,8 @@ case "$script_path" in
   *) script_parent='.' ;;
 esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
-executable="$script_dir/build/imgpaste-macos"
-state_dir="$home_dir/Library/Application Support/imgpaste"
+executable="$script_dir/build/cpcv-macos"
+state_dir="$home_dir/Library/Application Support/cpcv"
 default_config="$state_dir/config.json"
 config_pointer="$state_dir/launchd-config-path"
 launch_agents="$home_dir/Library/LaunchAgents"
@@ -157,7 +157,7 @@ plist="$launch_agents/$label.plist"
 case "$action" in
   status)
     if [[ ! -x "$executable" || -L "$executable" ]]; then
-      emit_status 'not-installed' 'The native imgpaste executable is not installed.' "$recovery_capabilities"
+      emit_status 'not-installed' 'The native cpcv executable is not installed.' "$recovery_capabilities"
       exit 0
     fi
     if ! config_file=$(resolve_config); then
@@ -165,34 +165,34 @@ case "$action" in
       exit 0
     fi
     if ! job_loaded; then
-      emit_status 'stopped' 'The imgpaste LaunchAgent is not loaded in this GUI session.'
+      emit_status 'stopped' 'The cpcv LaunchAgent is not loaded in this GUI session.'
       exit 0
     fi
     if ! owned_plist; then
       emit_status 'ownership-conflict' 'A same-label LaunchAgent is loaded but is not owned by this checkout.' "$recovery_capabilities"
       exit 0
     fi
-    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" status
+    exec /usr/bin/env CPCV_CONFIG="$config_file" "$executable" status
     ;;
   start)
     require_binary
     require_config
     require_owned_plist
     if job_loaded; then
-      printf '%s\n' 'imgpaste service is already loaded.'
+      printf '%s\n' 'cpcv service is already loaded.'
     else
       /bin/launchctl bootstrap "$domain" "$plist"
       /bin/launchctl kickstart -k "$domain/$label"
-      printf '%s\n' 'Started imgpaste service.'
+      printf '%s\n' 'Started cpcv service.'
     fi
     ;;
   stop)
     if job_loaded; then
       require_owned_plist
       /bin/launchctl bootout "$domain/$label"
-      printf '%s\n' 'Stopped imgpaste service. The LaunchAgent plist and all data were preserved.'
+      printf '%s\n' 'Stopped cpcv service. The LaunchAgent plist and all data were preserved.'
     else
-      printf '%s\n' 'imgpaste service is already stopped.'
+      printf '%s\n' 'cpcv service is already stopped.'
     fi
     ;;
   restart)
@@ -202,17 +202,17 @@ case "$action" in
     /bin/launchctl bootout "$domain/$label" >/dev/null 2>&1 || true
     /bin/launchctl bootstrap "$domain" "$plist"
     /bin/launchctl kickstart -k "$domain/$label"
-    printf '%s\n' 'Restarted imgpaste service.'
+    printf '%s\n' 'Restarted cpcv service.'
     ;;
   logs)
     require_binary
     require_config
-    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" logs
+    exec /usr/bin/env CPCV_CONFIG="$config_file" "$executable" logs
     ;;
   upload)
     require_binary
     require_config
-    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" upload
+    exec /usr/bin/env CPCV_CONFIG="$config_file" "$executable" upload
     ;;
   config)
     require_config
@@ -221,13 +221,13 @@ case "$action" in
   settings-read)
     require_binary
     require_config
-    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" settings-read
+    exec /usr/bin/env CPCV_CONFIG="$config_file" "$executable" settings-read
     ;;
   settings-save)
     require_binary
     require_config
     native_settings_arguments=(settings-save "$@")
-    /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" "${native_settings_arguments[@]}" >/dev/null
+    /usr/bin/env CPCV_CONFIG="$config_file" "$executable" "${native_settings_arguments[@]}" >/dev/null
     if job_loaded; then
       if [[ ! -L "$launch_agents" ]] && owned_plist; then
         if /bin/launchctl kickstart -k "$domain/$label"; then
@@ -254,6 +254,6 @@ case "$action" in
       fi
     fi
     require_binary
-    exec /usr/bin/env IMGPASTE_CONFIG="$config_file" "$executable" doctor
+    exec /usr/bin/env CPCV_CONFIG="$config_file" "$executable" doctor
     ;;
 esac

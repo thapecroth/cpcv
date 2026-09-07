@@ -13,11 +13,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-. "$PSScriptRoot\imgpaste-core.ps1"
+. "$PSScriptRoot\cpcv-core.ps1"
 
-$cfg = Get-ImgPasteConfig
+$cfg = Get-CpcvConfig
 if ($cfg.ConfigError) {
-    throw "$($cfg.ConfigError)`nCreate the file from '$PSScriptRoot\imgpaste.config.example.psd1' before installing."
+    throw "$($cfg.ConfigError)`nCreate the file from '$PSScriptRoot\cpcv.config.example.psd1' before installing."
 }
 
 foreach ($command in "powershell.exe", "ssh.exe", "scp.exe") {
@@ -28,51 +28,41 @@ $bin = Join-Path $env:USERPROFILE ".local\bin"
 $share = [IO.Path]::GetFullPath($PSScriptRoot)
 $startup = [Environment]::GetFolderPath("Startup")
 $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-$nowScript = Join-Path $share "imgpaste-now.ps1"
-$guardianScript = Join-Path $share "imgpaste-guardian.ps1"
-$nowWrapperPath = Join-Path $bin "imgpaste.cmd"
-$watchWrapperPath = Join-Path $bin "imgpaste-watch.cmd"
-$watchLnk = Join-Path $startup "imgpaste-watch.lnk"
-$nowLnk = Join-Path $startMenu "ImgPaste Now.lnk"
-$watchDescription = "Managed by imgpaste install-autostart.ps1 (guardian)"
-$nowDescription = "Managed by imgpaste install-autostart.ps1 (one-shot)"
+$nowScript = Join-Path $share "cpcv-now.ps1"
+$guardianScript = Join-Path $share "cpcv-guardian.ps1"
+$nowWrapperPath = Join-Path $bin "cpcv.cmd"
+$watchWrapperPath = Join-Path $bin "cpcv-watch.cmd"
+$watchLnk = Join-Path $startup "cpcv-watch.lnk"
+$nowLnk = Join-Path $startMenu "Cpcv Now.lnk"
+$watchDescription = "Managed by cpcv install-autostart.ps1 (guardian)"
+$nowDescription = "Managed by cpcv install-autostart.ps1 (one-shot)"
 
 # Lightweight command wrappers deliberately point to this checkout/install
 # root; the one-shot script needs its neighbouring core script.
 $nowWrapper = @"
-:: Managed by imgpaste install-autostart.ps1
-@echo off
-powershell.exe -NoProfile -STA -ExecutionPolicy RemoteSigned -File "$nowScript" %*
-"@
-
-$legacyNowWrapper = @"
+:: Managed by cpcv install-autostart.ps1
 @echo off
 powershell.exe -NoProfile -STA -ExecutionPolicy RemoteSigned -File "$nowScript" %*
 "@
 
 $watchWrapper = @"
-:: Managed by imgpaste install-autostart.ps1
-@echo off
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "$guardianScript"
-"@
-
-$legacyWatchWrapper = @"
+:: Managed by cpcv install-autostart.ps1
 @echo off
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "$guardianScript"
 "@
 
 # Fixed names are shared user resources. Validate every existing item before
 # writing anything so an unrelated shortcut or wrapper is never overwritten.
-if (-not (Test-ImgPasteCommandWrapperOwnership -Path $nowWrapperPath -ExpectedContent $nowWrapper -LegacyContent $legacyNowWrapper)) {
+if (-not (Test-CpcvCommandWrapperOwnership -Path $nowWrapperPath -ExpectedContent $nowWrapper)) {
     throw "Refusing to replace an unrelated command wrapper: $nowWrapperPath"
 }
-if (-not (Test-ImgPasteCommandWrapperOwnership -Path $watchWrapperPath -ExpectedContent $watchWrapper -LegacyContent $legacyWatchWrapper)) {
+if (-not (Test-CpcvCommandWrapperOwnership -Path $watchWrapperPath -ExpectedContent $watchWrapper)) {
     throw "Refusing to replace an unrelated command wrapper: $watchWrapperPath"
 }
-if (-not (Test-ImgPasteShortcutOwnership -ShortcutPath $watchLnk -ScriptPath $guardianScript -WorkingDirectory $share -Description $watchDescription -LegacyDescriptionPattern "Watch and upload clipboard images via SSH (*)")) {
+if (-not (Test-CpcvShortcutOwnership -ShortcutPath $watchLnk -ScriptPath $guardianScript -WorkingDirectory $share -Description $watchDescription)) {
     throw "Refusing to replace an unrelated Startup shortcut: $watchLnk"
 }
-if (-not (Test-ImgPasteShortcutOwnership -ShortcutPath $nowLnk -ScriptPath $nowScript -WorkingDirectory $share -Description $nowDescription -LegacyDescriptionPattern "Upload a clipboard image via SSH (*)")) {
+if (-not (Test-CpcvShortcutOwnership -ShortcutPath $nowLnk -ScriptPath $nowScript -WorkingDirectory $share -Description $nowDescription)) {
     throw "Refusing to replace an unrelated Start Menu shortcut: $nowLnk"
 }
 
@@ -99,60 +89,60 @@ $sc2.Save()
 $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
         $_.Name -in @("powershell.exe", "pwsh.exe") -and
-        (Test-ImgPasteProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath $guardianScript)
+        (Test-CpcvProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath $guardianScript)
     }
 if (-not $existing) {
     Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "RemoteSigned", "-File", ('"{0}"' -f $guardianScript)) -WindowStyle Hidden
-    Write-Host "Started imgpaste watchdog."
+    Write-Host "Started cpcv watchdog."
 }
 else {
-    Write-Host "ImgPaste watchdog is already running."
+    Write-Host "Cpcv watchdog is already running."
 }
 
-function Install-ImgPasteRemoteHelpers {
+function Install-CpcvRemoteHelpers {
     $sshOpts = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ConnectionAttempts=1", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2")
-    $stageResult = Invoke-ImgPasteProcess -FilePath "ssh" -Arguments ($sshOpts + @($cfg.HostAlias, "mktemp -d")) -Label "ssh create remote staging directory"
-    if (-not $stageResult.Ok) { throw "Could not create remote staging directory: $(Protect-ImgPasteLogDetail $stageResult.Detail)" }
+    $stageResult = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($cfg.HostAlias, "mktemp -d")) -Label "ssh create remote staging directory"
+    if (-not $stageResult.Ok) { throw "Could not create remote staging directory: $(Protect-CpcvLogDetail $stageResult.Detail)" }
     $stage = ($stageResult.StdOut -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
     if ($stage -notmatch '^/tmp/[A-Za-z0-9._-]+$') { throw "Remote staging path was unexpected; refusing to continue." }
 
     $files = @(
-        "imgpaste-latest.sh",
+        "cpcv-latest.sh",
         "xclip-shim.sh",
         "wl-paste-shim.sh",
-        "imgpaste.tmux",
-        "tmux\scripts\imgpaste-tmux-paste.sh",
-        "tmux\scripts\imgpaste-tmux-common.sh",
-        "tmux\scripts\imgpaste-tmux-status.sh",
-        "remote\install-tmux-imgpaste-plugin.sh"
+        "cpcv.tmux",
+        "tmux\scripts\cpcv-tmux-paste.sh",
+        "tmux\scripts\cpcv-tmux-common.sh",
+        "tmux\scripts\cpcv-tmux-status.sh",
+        "remote\install-tmux-cpcv-plugin.sh"
     ) | ForEach-Object { Join-Path $share $_ }
     foreach ($file in $files) { if (-not (Test-Path $file)) { throw "Missing helper: $file" } }
-    $copy = Invoke-ImgPasteProcess -FilePath "scp" -Arguments ($sshOpts + $files + @("$($cfg.HostAlias):$stage/")) -Label "scp remote helpers"
-    if (-not $copy.Ok) { throw "Could not copy remote helpers: $(Protect-ImgPasteLogDetail $copy.Detail)" }
+    $copy = Invoke-CpcvProcess -FilePath "scp" -Arguments ($sshOpts + $files + @("$($cfg.HostAlias):$stage/")) -Label "scp remote helpers"
+    if (-not $copy.Ok) { throw "Could not copy remote helpers: $(Protect-CpcvLogDetail $copy.Detail)" }
 
     $remoteDir = $cfg.RemoteDir.Trim('/')
     $remote = @"
 set -eu
 stage='$stage'
-mkdir -p "`$HOME/.local/bin" "`$HOME/.config/imgpaste" "`$HOME/$remoteDir"
-install -m 755 "`$stage/imgpaste-latest.sh" "`$HOME/.local/bin/imgpaste-latest"
-install -m 755 "`$stage/xclip-shim.sh" "`$HOME/.local/bin/imgpaste-xclip"
-install -m 755 "`$stage/wl-paste-shim.sh" "`$HOME/.local/bin/imgpaste-wl-paste"
-printf 'export IMGPASTE_DIR="%s"\n' "`$HOME/$remoteDir" > "`$HOME/.config/imgpaste/env"
-/usr/bin/env bash "`$stage/install-tmux-imgpaste-plugin.sh" --remote-dir "$remoteDir"
+mkdir -p "`$HOME/.local/bin" "`$HOME/.config/cpcv" "`$HOME/$remoteDir"
+install -m 755 "`$stage/cpcv-latest.sh" "`$HOME/.local/bin/cpcv-latest"
+install -m 755 "`$stage/xclip-shim.sh" "`$HOME/.local/bin/cpcv-xclip"
+install -m 755 "`$stage/wl-paste-shim.sh" "`$HOME/.local/bin/cpcv-wl-paste"
+printf 'export CPCV_DIR="%s"\n' "`$HOME/$remoteDir" > "`$HOME/.config/cpcv/env"
+/usr/bin/env bash "`$stage/install-tmux-cpcv-plugin.sh" --remote-dir "$remoteDir"
 rm -rf "`$stage"
 echo "Installed optional helpers in `$HOME/.local/bin"
 "@
-    $install = Invoke-ImgPasteProcess -FilePath "ssh" -Arguments ($sshOpts + @($cfg.HostAlias, $remote)) -Label "ssh install remote helpers"
-    if (-not $install.Ok) { throw "Could not install remote helpers: $(Protect-ImgPasteLogDetail $install.Detail)" }
+    $install = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($cfg.HostAlias, $remote)) -Label "ssh install remote helpers"
+    if (-not $install.Ok) { throw "Could not install remote helpers: $(Protect-CpcvLogDetail $install.Detail)" }
     Write-Host $install.StdOut.Trim()
 }
 
 Write-Host "Local watcher installed for SSH target '$($cfg.HostAlias)'."
-Write-Host "Screenshot/copy an image, wait about $($cfg.PollIntervalSeconds) seconds, then use the tmux imgpaste paste binding on the SSH host."
-Write-Host "Config: $(Get-ImgPasteConfigPath)"
+Write-Host "Screenshot/copy an image, wait about $($cfg.PollIntervalSeconds) seconds, then use the tmux cpcv paste binding on the SSH host."
+Write-Host "Config: $(Get-CpcvConfigPath)"
 if ($DeployRemoteHelpers) {
-    Install-ImgPasteRemoteHelpers
+    Install-CpcvRemoteHelpers
     Write-Host "Optional remote helpers and tmux plugin were installed. Add ~/.local/bin to PATH and the printed run-shell line to tmux on the remote host."
 }
 else {

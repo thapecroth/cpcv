@@ -19,8 +19,8 @@ Thanks for considering a contribution.
   LaunchAgent. Do not add a root LaunchDaemon, service, login-item helper, or
   administrator-required installation without an explicit security design.
 - Keep credentials, proxy URLs, usernames, and local paths out of tracked
-  files. Use `imgpaste.config.example.psd1` for examples only.
-- Keep `macos/imgpaste.macos.config.example.json` generic too.
+  files. Use `cpcv.config.example.psd1` for examples only.
+- Keep `macos/cpcv.macos.config.example.json` generic too.
   Configuration is data, not executable source; do not introduce fields that
   accept shell fragments, arbitrary executables, or unvalidated paths.
 - Treat remote helper changes as opt-in and avoid silently editing remote shell,

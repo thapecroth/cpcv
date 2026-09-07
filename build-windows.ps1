@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Builds a clean, portable Windows source archive for imgpaste.
+Builds a clean, portable Windows source archive for cpcv.
 
 .DESCRIPTION
 The Windows runtime is intentionally transparent PowerShell rather than a
@@ -21,7 +21,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Invoke-ImgPasteBuildGit {
+function Invoke-CpcvBuildGit {
     param([string[]]$Arguments)
 
     $output = & git.exe @Arguments 2>&1
@@ -32,36 +32,36 @@ function Invoke-ImgPasteBuildGit {
 }
 
 if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    throw "git.exe is required to build a clean imgpaste archive."
+    throw "git.exe is required to build a clean cpcv archive."
 }
 
-$repository = (Invoke-ImgPasteBuildGit -Arguments @("-C", $PSScriptRoot, "rev-parse", "--show-toplevel") | Select-Object -Last 1).Trim()
+$repository = (Invoke-CpcvBuildGit -Arguments @("-C", $PSScriptRoot, "rev-parse", "--show-toplevel") | Select-Object -Last 1).Trim()
 $expectedRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\\')
 $actualRoot = [IO.Path]::GetFullPath($repository).TrimEnd('\\')
 if ($actualRoot -ine $expectedRoot) {
-    throw "build-windows.ps1 must be run from the imgpaste repository root."
+    throw "build-windows.ps1 must be run from the cpcv repository root."
 }
 
 if (-not $AllowDirty) {
-    $dirty = Invoke-ImgPasteBuildGit -Arguments @("-C", $repository, "status", "--porcelain", "--untracked-files=no")
+    $dirty = Invoke-CpcvBuildGit -Arguments @("-C", $repository, "status", "--porcelain", "--untracked-files=no")
     if ($dirty.Count -gt 0) {
         throw "Refusing to build from modified tracked files. Commit or stash the changes first, or explicitly use -AllowDirty (the archive still contains HEAD only)."
     }
 }
 
-$revision = (Invoke-ImgPasteBuildGit -Arguments @("-C", $repository, "rev-parse", "--short=12", "HEAD") | Select-Object -Last 1).Trim()
+$revision = (Invoke-CpcvBuildGit -Arguments @("-C", $repository, "rev-parse", "--short=12", "HEAD") | Select-Object -Last 1).Trim()
 $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $outputDirectory -PathType Leaf) {
     throw "OutputDirectory is a file, not a directory: $outputDirectory"
 }
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 
-$archivePath = Join-Path $outputDirectory ("imgpaste-windows-{0}.zip" -f $revision)
+$archivePath = Join-Path $outputDirectory ("cpcv-windows-{0}.zip" -f $revision)
 if (Test-Path -LiteralPath $archivePath) {
     throw "Refusing to overwrite an existing build artifact: $archivePath"
 }
 
-[void](Invoke-ImgPasteBuildGit -Arguments @("-C", $repository, "archive", "--format=zip", "--prefix=imgpaste-windows/", "--output=$archivePath", "HEAD"))
+[void](Invoke-CpcvBuildGit -Arguments @("-C", $repository, "archive", "--format=zip", "--prefix=cpcv-windows/", "--output=$archivePath", "HEAD"))
 if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
     throw "git archive did not create the expected artifact: $archivePath"
 }
@@ -71,15 +71,15 @@ $zip = [IO.Compression.ZipFile]::OpenRead($archivePath)
 try {
     $names = @($zip.Entries | ForEach-Object { $_.FullName })
     foreach ($required in @(
-        "imgpaste-windows/README.md",
-        "imgpaste-windows/LICENSE",
-        "imgpaste-windows/imgpaste-core.ps1",
-        "imgpaste-windows/imgpaste-watch.ps1",
-        "imgpaste-windows/imgpaste-guardian.ps1",
-        "imgpaste-windows/imgpaste-tray.ps1",
-        "imgpaste-windows/install-autostart.ps1",
-        "imgpaste-windows/install-tray.ps1",
-        "imgpaste-windows/imgpaste.config.example.psd1"
+        "cpcv-windows/README.md",
+        "cpcv-windows/LICENSE",
+        "cpcv-windows/cpcv-core.ps1",
+        "cpcv-windows/cpcv-watch.ps1",
+        "cpcv-windows/cpcv-guardian.ps1",
+        "cpcv-windows/cpcv-tray.ps1",
+        "cpcv-windows/install-autostart.ps1",
+        "cpcv-windows/install-tray.ps1",
+        "cpcv-windows/cpcv.config.example.psd1"
     )) {
         if ($names -notcontains $required) { throw "Build archive is missing required file: $required" }
     }
@@ -90,12 +90,12 @@ try {
     # added locally but not committed before packaging.
     $branding = @(
         [pscustomobject]@{
-            Path = "imgpaste-windows/assets/windows/imgpaste-tray.ico"
+            Path = "cpcv-windows/assets/windows/cpcv-tray.ico"
             MaximumBytes = 1MB
             Header = [byte[]]@(0, 0, 1, 0)
         },
         [pscustomobject]@{
-            Path = "imgpaste-windows/assets/windows/imgpaste-logo.png"
+            Path = "cpcv-windows/assets/windows/cpcv-logo.png"
             MaximumBytes = 4MB
             Header = [byte[]]@(137, 80, 78, 71, 13, 10, 26, 10)
         }
@@ -130,7 +130,7 @@ try {
         $_ -match '(^|/)\.git(/|$)' -or
         $_ -match '(^|/)cache(/|$)' -or
         $_ -match '(^|/)(last-hash\.txt|last-remote-path\.txt|watch\.heartbeat)$' -or
-        $_ -match '(^|/)(imgpaste\.config|config)\.psd1$' -or
+        $_ -match '(^|/)(cpcv\.config|config)\.psd1$' -or
         $_ -match '\.log(?:\.\d+)?$'
     })
     if ($forbidden.Count -gt 0) {

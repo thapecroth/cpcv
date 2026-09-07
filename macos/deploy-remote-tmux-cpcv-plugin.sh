@@ -5,15 +5,15 @@ IFS=$'\n\t'
 umask 077
 
 die() {
-  printf 'imgpaste remote tmux deployment: %s\n' "$*" >&2
+  printf 'cpcv remote tmux deployment: %s\n' "$*" >&2
   exit 1
 }
 
 usage() {
   cat <<'USAGE'
-Usage: deploy-remote-tmux-imgpaste-plugin.sh --host SSH_ALIAS [--remote-dir clipboard-images]
+Usage: deploy-remote-tmux-cpcv-plugin.sh --host SSH_ALIAS [--remote-dir clipboard-images]
 
-Installs only imgpaste-owned remote plugin files. It does not edit tmux or
+Installs only cpcv-owned remote plugin files. It does not edit tmux or
 shell startup files; source the printed run-shell line yourself.
 USAGE
   exit 64
@@ -44,24 +44,24 @@ while [[ "$remote_dir" == */ ]]; do remote_dir=${remote_dir%/}; done
 
 script_dir=$(CDPATH= cd -P -- "${BASH_SOURCE[0]%/*}" && /bin/pwd -P)
 project_root=$(CDPATH= cd -P -- "$script_dir/.." && /bin/pwd -P)
-plugin="$project_root/imgpaste.tmux"
-paste="$project_root/tmux/scripts/imgpaste-tmux-paste.sh"
-common="$project_root/tmux/scripts/imgpaste-tmux-common.sh"
-status="$project_root/tmux/scripts/imgpaste-tmux-status.sh"
-installer="$project_root/remote/install-tmux-imgpaste-plugin.sh"
+plugin="$project_root/cpcv.tmux"
+paste="$project_root/tmux/scripts/cpcv-tmux-paste.sh"
+common="$project_root/tmux/scripts/cpcv-tmux-common.sh"
+status="$project_root/tmux/scripts/cpcv-tmux-status.sh"
+installer="$project_root/remote/install-tmux-cpcv-plugin.sh"
 [[ -f "$plugin" && ! -L "$plugin" && -f "$paste" && ! -L "$paste" && -f "$common" && ! -L "$common" && -f "$status" && ! -L "$status" && -f "$installer" && ! -L "$installer" ]] || \
   die 'Missing tmux plugin sources.'
 
-stage=$(ssh "${ssh_options[@]}" "$host" 'umask 077; mktemp -d "${TMPDIR:-/tmp}/imgpaste-tmux.XXXXXX"') || \
+stage=$(ssh "${ssh_options[@]}" "$host" 'umask 077; mktemp -d "${TMPDIR:-/tmp}/cpcv-tmux.XXXXXX"') || \
   die 'Could not create remote staging directory.'
-[[ "$stage" =~ ^/tmp/imgpaste-tmux\.[A-Za-z0-9]+$ ]] || die 'Remote staging path was invalid.'
+[[ "$stage" =~ ^/tmp/cpcv-tmux\.[A-Za-z0-9]+$ ]] || die 'Remote staging path was invalid.'
 cleanup() {
   ssh "${ssh_options[@]}" "$host" "find '$stage' -depth -delete" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 scp "${ssh_options[@]}" "$plugin" "$paste" "$common" "$status" "$installer" "$host:$stage/"
-ssh "${ssh_options[@]}" "$host" "IMGPASTE_STAGE_DIR='$stage' /usr/bin/env bash '$stage/install-tmux-imgpaste-plugin.sh' --remote-dir '$remote_dir'"
+ssh "${ssh_options[@]}" "$host" "CPCV_STAGE_DIR='$stage' /usr/bin/env bash '$stage/install-tmux-cpcv-plugin.sh' --remote-dir '$remote_dir'"
 trap - EXIT
 cleanup
-printf 'Remote tmux plugin installed on %s. Add the printed run-shell line and reload tmux; Ctrl-V triggers imgpaste in Warp.\n' "$host"
+printf 'Remote tmux plugin installed on %s. Add the printed run-shell line and reload tmux; Ctrl-V triggers cpcv in Warp.\n' "$host"

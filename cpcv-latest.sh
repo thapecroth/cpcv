@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Optional companion: insert the latest uploaded image path into one tmux pane.
-# Install as ~/.local/bin/imgpaste-latest on a POSIX SSH target.
+# Install as ~/.local/bin/cpcv-latest on a POSIX SSH target.
 
 set -euo pipefail
 
@@ -18,10 +18,10 @@ while (($#)); do
   esac
 done
 
-[ -r "$HOME/.config/imgpaste/env" ] && . "$HOME/.config/imgpaste/env"
-IMG_DIR="${IMGPASTE_DIR:-${IMGPPASTE_DIR:-$HOME/clipboard-images}}"
+[ -r "$HOME/.config/cpcv/env" ] && . "$HOME/.config/cpcv/env"
+IMG_DIR="${CPCV_DIR:-$HOME/clipboard-images}"
 [[ "$IMG_DIR" != *$'\n'* && "$IMG_DIR" != *$'\r'* ]] || {
-  printf 'Invalid imgpaste image directory.\n' >&2
+  printf 'Invalid cpcv image directory.\n' >&2
   exit 64
 }
 
@@ -43,7 +43,7 @@ elif command -v readlink >/dev/null 2>&1; then
 fi
 
 if [[ "$pane" =~ ^%[0-9]+$ ]]; then
-  buffer="imgpaste-${pane#%}-$$"
+  buffer="cpcv-${pane#%}-$$"
   cleanup() { tmux delete-buffer -b "$buffer" >/dev/null 2>&1 || true; }
   trap cleanup EXIT HUP INT TERM
   tmux set-buffer -b "$buffer" -- "$latest"

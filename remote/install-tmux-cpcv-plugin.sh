@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Install only imgpaste-owned tmux plugin files on an SSH target.
+# Install only cpcv-owned tmux plugin files on an SSH target.
 set -euo pipefail
 IFS=$'\n\t'
 umask 077
 
-readonly marker='# Managed by imgpaste tmux plugin'
+readonly marker='# Managed by cpcv tmux plugin'
 
 die() {
-  printf 'imgpaste tmux setup: %s\n' "$*" >&2
+  printf 'cpcv tmux setup: %s\n' "$*" >&2
   exit 1
 }
 
 usage() {
   cat <<'USAGE'
-Usage: install-tmux-imgpaste-plugin.sh --remote-dir RELATIVE_DIR
+Usage: install-tmux-cpcv-plugin.sh --remote-dir RELATIVE_DIR
 
-Installs the imgpaste tmux plugin without changing ~/.tmux.conf. Source the
+Installs the cpcv tmux plugin without changing ~/.tmux.conf. Source the
 printed run-shell line from a user-owned tmux configuration to enable it.
 USAGE
   exit 64
@@ -42,7 +42,7 @@ managed_file() {
   [[ -f "$path" && ! -L "$path" ]] && grep -Fqx "$marker" "$path"
 }
 
-stage_dir=${IMGPASTE_STAGE_DIR:-}
+stage_dir=${CPCV_STAGE_DIR:-}
 remote_dir=''
 while (($#)); do
   case "$1" in
@@ -54,14 +54,14 @@ done
 
 while [[ "$remote_dir" == */ ]]; do remote_dir=${remote_dir%/}; done
 [[ -n "$stage_dir" && "$stage_dir" == /* && -d "$stage_dir" && ! -L "$stage_dir" ]] || \
-  die 'IMGPASTE_STAGE_DIR must name a regular staged directory.'
+  die 'CPCV_STAGE_DIR must name a regular staged directory.'
 safe_remote_dir "$remote_dir" || die 'Remote directory must be a relative POSIX path without parent traversal.'
 [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || die 'HOME must be a simple absolute POSIX path.'
 
-source_plugin="$stage_dir/imgpaste.tmux"
-source_paste="$stage_dir/imgpaste-tmux-paste.sh"
-source_common="$stage_dir/imgpaste-tmux-common.sh"
-source_status="$stage_dir/imgpaste-tmux-status.sh"
+source_plugin="$stage_dir/cpcv.tmux"
+source_paste="$stage_dir/cpcv-tmux-paste.sh"
+source_common="$stage_dir/cpcv-tmux-common.sh"
+source_status="$stage_dir/cpcv-tmux-status.sh"
 [[ -f "$source_plugin" && ! -L "$source_plugin" ]] || die 'Missing staged tmux plugin.'
 [[ -f "$source_paste" && ! -L "$source_paste" ]] || die 'Missing staged tmux paste helper.'
 [[ -f "$source_common" && ! -L "$source_common" ]] || die 'Missing staged tmux common helper.'
@@ -71,14 +71,14 @@ grep -Fqx "$marker" "$source_paste" || die 'Staged tmux paste helper has no owne
 grep -Fqx "$marker" "$source_common" || die 'Staged tmux common helper has no ownership marker.'
 grep -Fqx "$marker" "$source_status" || die 'Staged tmux status helper has no ownership marker.'
 
-config_dir="$HOME/.config/imgpaste"
-plugin_dir="$HOME/.local/lib/imgpaste/tmux"
+config_dir="$HOME/.config/cpcv"
+plugin_dir="$HOME/.local/lib/cpcv/tmux"
 script_dir="$plugin_dir/tmux/scripts"
 config="$config_dir/tmux-paste.conf"
-plugin="$plugin_dir/imgpaste.tmux"
-paste="$script_dir/imgpaste-tmux-paste.sh"
-common="$script_dir/imgpaste-tmux-common.sh"
-status="$script_dir/imgpaste-tmux-status.sh"
+plugin="$plugin_dir/cpcv.tmux"
+paste="$script_dir/cpcv-tmux-paste.sh"
+common="$script_dir/cpcv-tmux-common.sh"
+status="$script_dir/cpcv-tmux-status.sh"
 
 for directory in "$config_dir" "$plugin_dir" "$script_dir" "$HOME/$remote_dir"; do
   [[ ! -L "$directory" ]] || die "Refusing symlinked directory: $directory"
@@ -102,6 +102,6 @@ $marker
 image_dir=$HOME/$remote_dir
 EOF
 
-printf 'Installed imgpaste tmux plugin files. Add this to your remote tmux config:\n'
+printf 'Installed cpcv tmux plugin files. Add this to your remote tmux config:\n'
 printf 'run-shell %s\n' "$plugin"
 printf 'Use Ctrl-V for the default capture key; Warp cannot map Cmd-V to a raw control key.\n'

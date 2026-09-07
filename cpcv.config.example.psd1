@@ -1,7 +1,7 @@
 @{
     # An SSH config alias (recommended), hostname, or user@host. This file is
-    # an example only; copy it to %LOCALAPPDATA%\imgpaste\config.psd1 or set
-    # IMGPASTE_CONFIG to a private file outside this checkout.
+    # an example only; copy it to %LOCALAPPDATA%\cpcv\config.psd1 or set
+    # CPCV_CONFIG to a private file outside this checkout.
     HostAlias = "my-server"
 
     # Relative to the remote user's HOME. Nested paths are supported.
@@ -12,8 +12,8 @@
     RemoteHome = ""
 
     # Optional local state/cache location. Leave this commented to use
-    # %LOCALAPPDATA%\imgpaste. This value may be an absolute Windows path.
-    # DataRoot = "C:\Users\you\AppData\Local\imgpaste"
+    # %LOCALAPPDATA%\cpcv. This value may be an absolute Windows path.
+    # DataRoot = "C:\Users\you\AppData\Local\cpcv"
 
     # Optional tuning. Defaults are conservative and normally need no change.
     # PollIntervalSeconds = 2

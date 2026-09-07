@@ -18,7 +18,7 @@ SSH hosts, Cloudflare endpoints, or other third-party infrastructure.
 
 ## Security model
 
-imgpaste executes the local OpenSSH client using a user-owned SSH
+cpcv executes the local OpenSSH client using a user-owned SSH
 configuration. It does not store private keys or tokens. Clipboard images and
 upload history are sensitive local data; users are responsible for protecting
 their chosen SSH host, remote directory, backups, and local cache.

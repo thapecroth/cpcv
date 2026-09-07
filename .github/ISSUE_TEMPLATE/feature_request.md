@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an improvement to imgpaste
+about: Suggest an improvement to cpcv
 title: "feature: "
 labels: enhancement
 assignees: ''

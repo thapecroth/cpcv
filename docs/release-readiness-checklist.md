@@ -38,7 +38,7 @@ candidate. It does not authorize making a repository public.
 - [ ] Windows autostart/tray installation and scoped uninstallation are
       idempotent and preserve data by default.
 - [ ] If claiming macOS support, installation creates only the current user's
-      `io.imgpaste.*` jobs and never creates a root LaunchDaemon.
+      `io.cpcv.*` jobs and never creates a root LaunchDaemon.
 - [ ] The tray status is bounded and redacted, and every control action targets
       the current checkout/service only.
 - [ ] The Windows dashboard and branded tray icon have been visually inspected

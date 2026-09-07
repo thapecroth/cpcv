@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Own the image/png selection on a private imgpaste X11 display.
+# Own the image/png selection on a private cpcv X11 display.
 set -euo pipefail
 IFS=$'\n\t'
 
-config_file="${IMGPASTE_X11_CONFIG:-$HOME/.config/imgpaste/codex-x11.conf}"
-xclip="${IMGPASTE_XCLIP:-/usr/bin/xclip}"
+config_file="${CPCV_X11_CONFIG:-$HOME/.config/cpcv/codex-x11.conf}"
+xclip="${CPCV_XCLIP:-/usr/bin/xclip}"
 publisher_pid=""
 
 die() {
-  printf 'imgpaste X11 bridge: %s\n' "$*" >&2
+  printf 'cpcv X11 bridge: %s\n' "$*" >&2
   exit 1
 }
 

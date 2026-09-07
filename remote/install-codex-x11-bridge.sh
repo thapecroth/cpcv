@@ -4,12 +4,12 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 077
 
-readonly display_unit='io.imgpaste.codex-x11.service'
-readonly bridge_unit='io.imgpaste.codex-x11-bridge.service'
-readonly marker='# Managed by imgpaste install-codex-x11-bridge.sh'
+readonly display_unit='io.cpcv.codex-x11.service'
+readonly bridge_unit='io.cpcv.codex-x11-bridge.service'
+readonly marker='# Managed by cpcv install-codex-x11-bridge.sh'
 
 die() {
-  printf 'imgpaste Codex X11 setup: %s\n' "$*" >&2
+  printf 'cpcv Codex X11 setup: %s\n' "$*" >&2
   exit 1
 }
 
@@ -123,14 +123,14 @@ remove_zsh_block() {
   [[ ! -L "$zshrc" ]] || die "Refusing symlinked zshrc: $zshrc"
   [[ -e "$zshrc" ]] || return 0
   [[ -f "$zshrc" && ! -L "$zshrc" ]] || die "Refusing to modify non-regular zshrc: $zshrc"
-  starts=$(grep -Fxc '# >>> imgpaste Codex X11 >>>' "$zshrc" || true)
-  ends=$(grep -Fxc '# <<< imgpaste Codex X11 <<<' "$zshrc" || true)
-  [[ "$starts" == "$ends" && "$starts" -le 1 ]] || die 'Refusing malformed imgpaste Codex X11 zshrc markers.'
+  starts=$(grep -Fxc '# >>> cpcv Codex X11 >>>' "$zshrc" || true)
+  ends=$(grep -Fxc '# <<< cpcv Codex X11 <<<' "$zshrc" || true)
+  [[ "$starts" == "$ends" && "$starts" -le 1 ]] || die 'Refusing malformed cpcv Codex X11 zshrc markers.'
   mode=$(stat -c '%a' "$zshrc")
   temporary=$(mktemp "${zshrc%/*}/.${zshrc##*/}.XXXXXX")
   awk '
-    /^# >>> imgpaste Codex X11 >>>$/ { dropping = 1; next }
-    /^# <<< imgpaste Codex X11 <<<$/{ dropping = 0; next }
+    /^# >>> cpcv Codex X11 >>>$/ { dropping = 1; next }
+    /^# <<< cpcv Codex X11 <<<$/{ dropping = 0; next }
     !dropping { print }
   ' "$zshrc" > "$temporary"
   chmod "$mode" "$temporary"
@@ -143,7 +143,7 @@ preflight_zsh_alias() {
     die 'Refusing to modify ~/.zshrc because zsh defines an alias named codex.'
 }
 
-stage_dir=${IMGPASTE_STAGE_DIR:-}
+stage_dir=${CPCV_STAGE_DIR:-}
 remote_dir=''
 display=':98'
 enable_zsh=0
@@ -159,7 +159,7 @@ done
 
 while [[ "$remote_dir" == */ ]]; do remote_dir=${remote_dir%/}; done
 [[ -n "$stage_dir" && "$stage_dir" == /* && -d "$stage_dir" && ! -L "$stage_dir" ]] || \
-  die 'IMGPASTE_STAGE_DIR must name a regular staged directory.'
+  die 'CPCV_STAGE_DIR must name a regular staged directory.'
 safe_remote_dir "$remote_dir" || die 'Remote directory must be a relative POSIX path without parent traversal.'
 [[ "$display" =~ ^:[0-9]+$ ]] || die 'Display must be a local display such as :98.'
 [[ "$HOME" =~ ^/[A-Za-z0-9._/-]+$ ]] || die 'HOME must be a simple absolute POSIX path.'
@@ -176,23 +176,23 @@ done
 if command -v loginctl >/dev/null 2>&1; then
   linger=$(/usr/bin/loginctl show-user "$USER" -p Linger --value 2>/dev/null || true)
   [[ "$linger" == 'yes' ]] || \
-    printf 'imgpaste Codex X11 setup: warning: user lingering is disabled; services can stop after logout.\n' >&2
+    printf 'cpcv Codex X11 setup: warning: user lingering is disabled; services can stop after logout.\n' >&2
 fi
 
-source_bridge="$stage_dir/imgpaste-codex-x11-bridge.sh"
+source_bridge="$stage_dir/cpcv-codex-x11-bridge.sh"
 source_test="$stage_dir/test-codex-x11-bridge.sh"
 source_uninstaller="$stage_dir/uninstall-codex-x11-bridge.sh"
 [[ -f "$source_bridge" && ! -L "$source_bridge" ]] || die 'Missing staged X11 bridge script.'
 [[ -f "$source_test" && ! -L "$source_test" ]] || die 'Missing staged X11 bridge test script.'
 [[ -f "$source_uninstaller" && ! -L "$source_uninstaller" ]] || die 'Missing staged X11 bridge uninstaller.'
 
-config_dir="$HOME/.config/imgpaste"
+config_dir="$HOME/.config/cpcv"
 unit_dir="$HOME/.config/systemd/user"
-library_dir="$HOME/.local/lib/imgpaste"
-state_dir="$HOME/.local/state/imgpaste/codex-x11"
-bridge="$library_dir/imgpaste-codex-x11-bridge"
-test_script="$library_dir/imgpaste-codex-x11-test"
-uninstaller="$library_dir/imgpaste-codex-x11-uninstall"
+library_dir="$HOME/.local/lib/cpcv"
+state_dir="$HOME/.local/state/cpcv/codex-x11"
+bridge="$library_dir/cpcv-codex-x11-bridge"
+test_script="$library_dir/cpcv-codex-x11-test"
+uninstaller="$library_dir/cpcv-codex-x11-uninstall"
 config="$config_dir/codex-x11.conf"
 authority="$state_dir/Xauthority"
 ownership="$state_dir/codex-x11.manifest"
@@ -253,7 +253,7 @@ cookie=$(/usr/bin/mcookie)
 write_file "$display_file" 600 <<EOF
 $marker
 [Unit]
-Description=imgpaste private X11 display for native Codex image paste
+Description=cpcv private X11 display for native Codex image paste
 
 [Service]
 Type=simple
@@ -267,7 +267,7 @@ EOF
 write_file "$bridge_file" 600 <<EOF
 $marker
 [Unit]
-Description=imgpaste X11 image clipboard bridge
+Description=cpcv X11 image clipboard bridge
 Requires=$display_unit
 After=$display_unit
 
@@ -296,24 +296,24 @@ if ((enable_zsh)); then
   remove_zsh_block "$zshrc"
   {
     printf '\n'
-    printf '%s\n' '# >>> imgpaste Codex X11 >>>'
-    printf '%s\n' 'if (( $+functions[codex] )) && [[ "${functions[codex]}" != *"__imgpaste_codex_original"* ]]; then'
-    printf '%s\n' '  functions -c codex __imgpaste_codex_original'
+    printf '%s\n' '# >>> cpcv Codex X11 >>>'
+    printf '%s\n' 'if (( $+functions[codex] )) && [[ "${functions[codex]}" != *"__cpcv_codex_original"* ]]; then'
+    printf '%s\n' '  functions -c codex __cpcv_codex_original'
     printf '%s\n' '  function codex {'
-    printf '    DISPLAY=%s XAUTHORITY=%s __imgpaste_codex_original "$@"\n' "$display" "$authority"
+    printf '    DISPLAY=%s XAUTHORITY=%s __cpcv_codex_original "$@"\n' "$display" "$authority"
     printf '%s\n' '  }'
     printf '%s\n' 'elif (( ! $+functions[codex] )); then'
     printf '%s\n' '  function codex {'
     printf '    DISPLAY=%s XAUTHORITY=%s command codex "$@"\n' "$display" "$authority"
     printf '%s\n' '  }'
     printf '%s\n' 'fi'
-    printf '%s\n' '# <<< imgpaste Codex X11 <<<'
+    printf '%s\n' '# <<< cpcv Codex X11 <<<'
   } >> "$zshrc"
   zsh_definition=$("$zsh_path" -ic 'functions codex' 2>/dev/null || true)
   [[ "$zsh_definition" == *"DISPLAY=$display"* && "$zsh_definition" == *"XAUTHORITY=$authority"* ]] || \
     die 'Fresh zsh shell did not install the private Codex display wrapper.'
 fi
 
-printf 'Installed imgpaste Codex X11 bridge on %s.\n' "$display"
+printf 'Installed cpcv Codex X11 bridge on %s.\n' "$display"
 printf 'New interactive zsh Codex sessions use DISPLAY=%s and XAUTHORITY=%s.\n' "$display" "$authority"
 printf 'Existing Codex processes must be restarted before image paste can work.\n'

@@ -13,16 +13,16 @@ diag-*.txt
 Thumbs.db
 desktop.ini
 
-# Per-user connection settings. Keep custom IMGPASTE_CONFIG files outside the
+# Per-user connection settings. Keep custom CPCV_CONFIG files outside the
 # checkout when possible. If one must live here, use one of these ignored names.
 # Never commit hosts, usernames, local paths, passwords, keys, tokens, or proxy URLs.
-imgpaste.config.psd1
+cpcv.config.psd1
 config.psd1
 *.private.psd1
 *.local.psd1
 
 # Keep native macOS JSON configuration local as well.
-imgpaste.config.json
+cpcv.config.json
 config.json
 *.private.json
 *.local.json

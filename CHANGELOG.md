@@ -15,7 +15,7 @@ fixes increment the patch version.
 - Bounds for individual clipboard images and retained local cache bytes.
 - An optional Windows notification-area tray with bounded/redacted status and
   scoped local controls.
-- An original imgpaste application mark, transparent dashboard logo, and
+- An original cpcv application mark, transparent dashboard logo, and
   multi-resolution Windows tray icon.
 - A reproducible `build-windows.ps1` archive build that packages only committed
   source and validates required branded assets.

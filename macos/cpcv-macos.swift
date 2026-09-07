@@ -1,4 +1,4 @@
-// imgpaste native macOS client.
+// cpcv native macOS client.
 //
 // This source is compiled locally by macos/install-macos.sh.  It intentionally
 // uses AppKit and the system OpenSSH client only: no screenshot application,
@@ -10,7 +10,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-private let imgPasteVersion = "0.3.0"
+private let cpcvVersion = "0.3.0"
 private let maxStatusBytes = 65_536
 private let sshOptions = [
     "-o", "BatchMode=yes",
@@ -29,7 +29,7 @@ private func installTerminationHandlers() {
     _ = signal(SIGINT, requestTermination)
 }
 
-enum ImgPasteError: LocalizedError {
+enum CpcvError: LocalizedError {
     case configuration(String)
     case io(String)
 
@@ -163,11 +163,11 @@ enum UploadResult {
 
 private func defaultDataRoot() -> String {
     FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/imgpaste", isDirectory: true).path
+        .appendingPathComponent("Library/Application Support/cpcv", isDirectory: true).path
 }
 
 private func configPath() -> String {
-    if let override = ProcessInfo.processInfo.environment["IMGPASTE_CONFIG"], !override.isEmpty {
+    if let override = ProcessInfo.processInfo.environment["CPCV_CONFIG"], !override.isEmpty {
         // Keep the override literal and absolute. Expanding `~` here would
         // diverge from the installer/controller contract and turn a compact
         // environment value into an unexpected local path.
@@ -180,7 +180,7 @@ private func configPath() -> String {
 private func strictInteger(_ value: Int?, defaultValue: Int, name: String, minimum: Int, maximum: Int) throws -> Int {
     let resolved = value ?? defaultValue
     guard resolved >= minimum && resolved <= maximum else {
-        throw ImgPasteError.configuration("\(name) is outside its supported range")
+        throw CpcvError.configuration("\(name) is outside its supported range")
     }
     return resolved
 }
@@ -192,11 +192,11 @@ private func matches(_ value: String, _ pattern: String) -> Bool {
 private func normalizedDataRoot(_ value: String?) throws -> String {
     let raw = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? defaultDataRoot()
     guard !raw.isEmpty, !raw.contains("\0") else {
-        throw ImgPasteError.configuration("DataRoot must be a non-empty local path")
+        throw CpcvError.configuration("DataRoot must be a non-empty local path")
     }
     let expanded = (raw as NSString).expandingTildeInPath
     guard expanded.hasPrefix("/") else {
-        throw ImgPasteError.configuration("DataRoot must be an absolute macOS path")
+        throw CpcvError.configuration("DataRoot must be an absolute macOS path")
     }
     return URL(fileURLWithPath: expanded).standardizedFileURL.path
 }
@@ -204,20 +204,20 @@ private func normalizedDataRoot(_ value: String?) throws -> String {
 private func configFromData(_ data: Data) throws -> Config {
     let raw: RawConfig
     do { raw = try JSONDecoder().decode(RawConfig.self, from: data) }
-    catch { throw ImgPasteError.configuration("configuration-invalid") }
+    catch { throw CpcvError.configuration("configuration-invalid") }
 
     let host = raw.hostAlias.trimmingCharacters(in: .whitespacesAndNewlines)
     guard matches(host, "^[A-Za-z0-9][A-Za-z0-9._@:-]*$") else {
-        throw ImgPasteError.configuration("host-alias-invalid")
+        throw CpcvError.configuration("host-alias-invalid")
     }
     let remoteDir = (raw.remoteDir ?? "clipboard-images").trimmingCharacters(in: .whitespacesAndNewlines)
     guard matches(remoteDir, "^[A-Za-z0-9][A-Za-z0-9._/-]*$"), !remoteDir.hasPrefix("/"),
           !matches(remoteDir, "(^|/)\\.\\.(/|$)") else {
-        throw ImgPasteError.configuration("remote-dir-invalid")
+        throw CpcvError.configuration("remote-dir-invalid")
     }
     let remoteHome = (raw.remoteHome ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     guard remoteHome.isEmpty || (matches(remoteHome, "^/[A-Za-z0-9._/-]*$") && !matches(remoteHome, "(^|/)\\.\\.(/|$)")) else {
-        throw ImgPasteError.configuration("remote-home-invalid")
+        throw CpcvError.configuration("remote-home-invalid")
     }
 
     let commandTimeout = try strictInteger(raw.commandTimeoutSeconds, defaultValue: 35, name: "CommandTimeoutSeconds", minimum: 1, maximum: 600)
@@ -230,9 +230,9 @@ private func configFromData(_ data: Data) throws -> Config {
     let maxCache = try strictInteger(raw.maxCacheBytes, defaultValue: 268_435_456, name: "MaxCacheBytes", minimum: 8_388_608, maximum: 1_073_741_824)
     let maxImage = try strictInteger(raw.maxImageBytes, defaultValue: 52_428_800, name: "MaxImageBytes", minimum: 1_048_576, maximum: 268_435_456)
     guard watchdogStale >= commandTimeout * 3 + watchdogCheck else {
-        throw ImgPasteError.configuration("watchdog-stale-too-small")
+        throw CpcvError.configuration("watchdog-stale-too-small")
     }
-    guard maxImage <= maxCache else { throw ImgPasteError.configuration("max-image-exceeds-cache") }
+    guard maxImage <= maxCache else { throw CpcvError.configuration("max-image-exceeds-cache") }
 
     return Config(
         hostAlias: host, remoteDir: remoteDir, remoteHome: remoteHome,
@@ -250,21 +250,21 @@ private func loadConfig() throws -> Config {
     guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
           let size = attributes[.size] as? NSNumber,
           size.intValue >= 0, size.intValue <= maxStatusBytes else {
-        throw ImgPasteError.configuration("configuration-too-large")
+        throw CpcvError.configuration("configuration-too-large")
     }
     let data: Data
     do { data = try Data(contentsOf: url, options: [.mappedIfSafe]) }
-    catch { throw ImgPasteError.configuration("configuration-unavailable") }
-    guard data.count <= maxStatusBytes else { throw ImgPasteError.configuration("configuration-too-large") }
+    catch { throw CpcvError.configuration("configuration-unavailable") }
+    guard data.count <= maxStatusBytes else { throw CpcvError.configuration("configuration-too-large") }
     return try configFromData(data)
 }
 
 private func settingsConfigURL() throws -> URL {
     let path = configPath()
-    guard !path.isEmpty else { throw ImgPasteError.configuration("configuration-unavailable") }
+    guard !path.isEmpty else { throw CpcvError.configuration("configuration-unavailable") }
     let url = URL(fileURLWithPath: path).standardizedFileURL
     guard isRegularNonSymlink(url.path) else {
-        throw ImgPasteError.configuration("configuration-unavailable")
+        throw CpcvError.configuration("configuration-unavailable")
     }
     return url.resolvingSymlinksInPath().standardizedFileURL
 }
@@ -274,15 +274,15 @@ private func settingsJSONObject() throws -> (URL, [String: Any]) {
     guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
           let size = attributes[.size] as? NSNumber,
           size.intValue >= 0, size.intValue <= maxStatusBytes else {
-        throw ImgPasteError.configuration("configuration-too-large")
+        throw CpcvError.configuration("configuration-too-large")
     }
     let data: Data
     do { data = try Data(contentsOf: url, options: [.mappedIfSafe]) }
-    catch { throw ImgPasteError.configuration("configuration-unavailable") }
+    catch { throw CpcvError.configuration("configuration-unavailable") }
     guard data.count <= maxStatusBytes,
           let object = try? JSONSerialization.jsonObject(with: data),
           let dictionary = object as? [String: Any] else {
-        throw ImgPasteError.configuration("configuration-invalid")
+        throw CpcvError.configuration("configuration-invalid")
     }
     return (url, dictionary)
 }
@@ -343,17 +343,17 @@ private func settingsArguments() -> SettingsForm? {
 private func writePrivateConfiguration(_ data: Data, to url: URL) throws {
     let directory = url.deletingLastPathComponent()
     guard directory.resolvingSymlinksInPath().standardizedFileURL.path == directory.path else {
-        throw ImgPasteError.io("configuration-directory-unsafe")
+        throw CpcvError.io("configuration-directory-unsafe")
     }
-    let temporary = directory.appendingPathComponent(".imgpaste-settings-\(UUID().uuidString).tmp")
+    let temporary = directory.appendingPathComponent(".cpcv-settings-\(UUID().uuidString).tmp")
     defer { try? FileManager.default.removeItem(at: temporary) }
     guard FileManager.default.createFile(atPath: temporary.path, contents: data,
                                          attributes: [.posixPermissions: 0o600]) else {
-        throw ImgPasteError.io("configuration-write-failed")
+        throw CpcvError.io("configuration-write-failed")
     }
     _ = chmod(temporary.path, S_IRUSR | S_IWUSR)
     guard rename(temporary.path, url.path) == 0 else {
-        throw ImgPasteError.io("configuration-write-failed")
+        throw CpcvError.io("configuration-write-failed")
     }
     _ = chmod(url.path, S_IRUSR | S_IWUSR)
 }
@@ -371,7 +371,7 @@ private func saveSettings() -> Int32 {
         candidate["remoteHome"] = update.remoteHome
         candidate["pollIntervalSeconds"] = update.pollIntervalSeconds
         let data = try JSONSerialization.data(withJSONObject: candidate, options: [.sortedKeys])
-        guard data.count <= maxStatusBytes else { throw ImgPasteError.configuration("configuration-too-large") }
+        guard data.count <= maxStatusBytes else { throw CpcvError.configuration("configuration-too-large") }
         _ = try configFromData(data)
         try writePrivateConfiguration(data, to: url)
         return printSettingsForm(update)
@@ -394,7 +394,7 @@ private func writePrivateData(_ data: Data, path: String) throws {
     try data.write(to: URL(fileURLWithPath: temporary), options: [])
     _ = chmod(temporary, S_IRUSR | S_IWUSR)
     guard rename(temporary, path) == 0 else {
-        throw ImgPasteError.io("state-write-failed")
+        throw CpcvError.io("state-write-failed")
     }
     _ = chmod(path, S_IRUSR | S_IWUSR)
 }
@@ -470,7 +470,7 @@ private func writeStatus(_ config: Config, mode: String, state: String, error: S
     let remote = readRemotePath(config)
     let doctor = doctorFields(config)
     let status = Status(
-        version: imgPasteVersion, mode: mode, pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
+        version: cpcvVersion, mode: mode, pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
         state: state, lastSuccessAt: success ? ISO8601DateFormatter().string(from: Date()) : prior?.lastSuccessAt,
         lastError: error.map { redact($0, limit: 256) }, activeChildPgid: activeChildPgid,
         capabilities: ["status", "start", "stop", "restart", "logs", "upload", "config", "settings-read", "settings-save", "doctor"],
@@ -487,7 +487,7 @@ private func writeStatus(_ config: Config, mode: String, state: String, error: S
 private func statusForUnavailableConfig() -> Status {
     let reportPath = URL(fileURLWithPath: defaultDataRoot()).appendingPathComponent("doctor-report.json").path
     let report = decodeDoctorReport(reportPath)
-    return Status(version: imgPasteVersion, mode: "guardian", pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
+    return Status(version: cpcvVersion, mode: "guardian", pid: Int(getpid()), updatedAt: ISO8601DateFormatter().string(from: Date()),
            state: "configuration-invalid", lastSuccessAt: nil, lastError: "configuration-invalid", activeChildPgid: nil,
            capabilities: ["status", "config", "settings-read", "settings-save", "doctor"], latestPath: nil, lastRemotePath: nil, logFile: nil,
            doctorOverall: report?.overall, doctorSummary: report?.summary, doctorUpdatedAt: report?.updatedAt)
@@ -1140,9 +1140,9 @@ private func waitForLocalWatcher(_ config: Config, notBefore: Date) -> Bool {
 
 private func repairLocalService(_ config: Config, checks: inout [DoctorCheck], repairs: inout [String]) {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
-    let plist = URL(fileURLWithPath: home).appendingPathComponent("Library/LaunchAgents/io.imgpaste.guardian.plist").path
-    let marker = "Managed by imgpaste install-macos.sh"
-    let domainLabel = "gui/\(getuid())/io.imgpaste.guardian"
+    let plist = URL(fileURLWithPath: home).appendingPathComponent("Library/LaunchAgents/io.cpcv.guardian.plist").path
+    let marker = "Managed by cpcv install-macos.sh"
+    let domainLabel = "gui/\(getuid())/io.cpcv.guardian"
     let installer = URL(fileURLWithPath: projectRoot()).appendingPathComponent("macos/install-macos.sh").path
 
     if FileManager.default.fileExists(atPath: plist) {
@@ -1196,13 +1196,13 @@ private func repairLocalService(_ config: Config, checks: inout [DoctorCheck], r
 private func remoteBridgeDetectionCommand(remoteDir: String) -> String {
     """
     set -eu
-    a="$HOME/.config/systemd/user/io.imgpaste.codex-x11.service"
-    b="$HOME/.config/systemd/user/io.imgpaste.codex-x11-bridge.service"
+    a="$HOME/.config/systemd/user/io.cpcv.codex-x11.service"
+    b="$HOME/.config/systemd/user/io.cpcv.codex-x11-bridge.service"
     if [ ! -e "$a" ] && [ ! -e "$b" ]; then printf 'absent'; exit 0; fi
     if [ ! -f "$a" ] || [ -L "$a" ] || [ ! -f "$b" ] || [ -L "$b" ]; then printf 'conflict'; exit 20; fi
-    marker='# Managed by imgpaste install-codex-x11-bridge.sh'
+    marker='# Managed by cpcv install-codex-x11-bridge.sh'
     grep -Fqx "$marker" "$a" && grep -Fqx "$marker" "$b" || { printf 'conflict'; exit 21; }
-    c="$HOME/.config/imgpaste/codex-x11.conf"
+    c="$HOME/.config/cpcv/codex-x11.conf"
     [ -f "$c" ] && [ ! -L "$c" ] || { printf 'partial'; exit 22; }
     for key in display image_dir authority; do
       count=$(grep -c "^$key=" "$c" || true)
@@ -1217,7 +1217,7 @@ private func remoteBridgeDetectionCommand(remoteDir: String) -> String {
     case "$authority" in "$HOME/"*) ;; *) printf 'partial'; exit 24 ;; esac
     [ -f "$authority" ] && [ ! -L "$authority" ] || { printf 'partial'; exit 24; }
     z=0
-    grep -Fqx '# >>> imgpaste Codex X11 >>>' "$HOME/.zshrc" 2>/dev/null && z=1
+    grep -Fqx '# >>> cpcv Codex X11 >>>' "$HOME/.zshrc" 2>/dev/null && z=1
     printf 'managed|%s|%s|%s' "$display" "$z" "$match"
     """
 }
@@ -1225,11 +1225,11 @@ private func remoteBridgeDetectionCommand(remoteDir: String) -> String {
 private func remoteBridgeVerifyCommand(remoteDir: String) -> String {
     """
     set -eu
-    systemctl --user is-active --quiet io.imgpaste.codex-x11.service
-    systemctl --user is-active --quiet io.imgpaste.codex-x11-bridge.service
-    test -x "$HOME/.local/lib/imgpaste/imgpaste-codex-x11-test"
+    systemctl --user is-active --quiet io.cpcv.codex-x11.service
+    systemctl --user is-active --quiet io.cpcv.codex-x11-bridge.service
+    test -x "$HOME/.local/lib/cpcv/cpcv-codex-x11-test"
     if [ ! -e "$HOME/\(remoteDir)/latest.png" ]; then printf 'pending'; exit 0; fi
-    "$HOME/.local/lib/imgpaste/imgpaste-codex-x11-test" >/dev/null
+    "$HOME/.local/lib/cpcv/cpcv-codex-x11-test" >/dev/null
     printf 'ready'
     """
 }
@@ -1359,7 +1359,7 @@ private func runDoctor() -> Int32 {
         set -eu
         d="$HOME/\(remoteDir)"
         if [ -d "$d" ]; then state=present; else mkdir -p "$d"; state=created; fi
-        probe="$d/.imgpaste-doctor-$$"
+        probe="$d/.cpcv-doctor-$$"
         trap 'rm -f "$probe"' EXIT HUP INT TERM
         : > "$probe"
         printf '%s' "$state"
@@ -1481,7 +1481,7 @@ private func runSelfTest() -> Int32 {
         fputs("self-test output bound failed\n", stderr)
         return 1
     }
-    let uploadingStatus = Status(version: imgPasteVersion, mode: "watch", pid: 42,
+    let uploadingStatus = Status(version: cpcvVersion, mode: "watch", pid: 42,
                                  updatedAt: ISO8601DateFormatter().string(from: Date()), state: "uploading",
                                  lastSuccessAt: nil, lastError: nil, activeChildPgid: nil, capabilities: [],
                                  latestPath: nil, lastRemotePath: nil, logFile: nil,
@@ -1535,6 +1535,6 @@ case "settings-save": exit(saveSettings())
 case "self-test": exit(runSelfTest())
 case "validate-config": exit(validateConfiguration())
 default:
-    fputs("Usage: imgpaste-macos [guardian|watch|status|logs|upload|doctor|settings-read|settings-save|self-test|validate-config]\n", stderr)
+    fputs("Usage: cpcv-macos [guardian|watch|status|logs|upload|doctor|settings-read|settings-save|self-test|validate-config]\n", stderr)
     exit(64)
 }

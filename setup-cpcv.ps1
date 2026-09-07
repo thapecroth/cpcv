@@ -9,5 +9,5 @@ the previous setup command while making optional remote helper changes explicit.
 [CmdletBinding()]
 param([switch]$DeployRemoteHelpers)
 
-Write-Warning "setup-imgpaste.ps1 is a compatibility wrapper. Use install-autostart.ps1 for new installations."
+Write-Warning "setup-cpcv.ps1 is a compatibility wrapper. Use install-autostart.ps1 for new installations."
 & "$PSScriptRoot\install-autostart.ps1" -DeployRemoteHelpers:$DeployRemoteHelpers
