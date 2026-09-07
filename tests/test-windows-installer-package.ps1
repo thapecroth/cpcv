@@ -69,6 +69,7 @@ foreach ($required in @(
     'Test-CpcvExecutableHeader',
     'show", "HEAD:VERSION',
     "[version]'6.3'",
+    '--version',
     'CpcvOutputBaseName'
 )) {
     Assert-CpcvInstallerPackage ($build.Contains($required)) "Windows build script is missing installer packaging behavior: $required"

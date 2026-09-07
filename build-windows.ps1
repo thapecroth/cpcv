@@ -92,12 +92,16 @@ function Resolve-CpcvInnoCompiler {
         $resolved = [IO.Path]::GetFullPath($candidate)
         $versionText = (Get-Item -LiteralPath $resolved).VersionInfo.FileVersion
         $versionMatch = [regex]::Match([string]$versionText, '\d+(?:\.\d+){1,3}')
-        if (-not $versionMatch.Success) {
-            $rejected.Add("$resolved (unknown version)")
-            continue
+        $reportedVersion = if ($versionMatch.Success) { $versionMatch.Value } else { '' }
+        if ([string]::IsNullOrWhiteSpace($reportedVersion) -or [version]$reportedVersion -lt [version]'6.3') {
+            # ISCC's PE resource can be 0.0.0.0 on hosted runners. The
+            # compiler's documented --version switch is authoritative.
+            $probeOutput = @(& $resolved --version 2>&1)
+            $probeMatch = [regex]::Match(($probeOutput -join [Environment]::NewLine), '\d+(?:\.\d+){1,3}')
+            if ($probeMatch.Success) { $reportedVersion = $probeMatch.Value }
         }
-        if ([version]$versionMatch.Value -lt [version]'6.3') {
-            $rejected.Add("$resolved ($($versionMatch.Value))")
+        if ([string]::IsNullOrWhiteSpace($reportedVersion) -or [version]$reportedVersion -lt [version]'6.3') {
+            $rejected.Add("$resolved $(if ($reportedVersion) { "($reportedVersion)" } else { '(unknown version)' })")
             continue
         }
         return $resolved

@@ -15,7 +15,7 @@ concurrency:
 jobs:
   test-windows:
     name: Windows PowerShell
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
