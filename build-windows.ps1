@@ -73,31 +73,37 @@ function Resolve-CpcvInnoCompiler {
     param([AllowEmptyString()][string]$RequestedPath)
 
     $candidates = [System.Collections.Generic.List[string]]::new()
+    $rejected = [System.Collections.Generic.List[string]]::new()
     if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
         $candidates.Add($RequestedPath)
     }
-    $fromPath = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
-    if ($fromPath) { $candidates.Add($fromPath.Source) }
     foreach ($programFiles in @(${env:ProgramFiles(x86)}, $env:ProgramFiles)) {
         if (-not [string]::IsNullOrWhiteSpace($programFiles)) {
             $candidates.Add((Join-Path $programFiles "Inno Setup 6\ISCC.exe"))
         }
     }
+    # A Chocolatey PATH shim can report version 0.0.0.0 even when it launches
+    # a current compiler. Prefer the real installation, then consider PATH.
+    $fromPath = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+    if ($fromPath) { $candidates.Add($fromPath.Source) }
 
-    foreach ($candidate in $candidates) {
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
         $resolved = [IO.Path]::GetFullPath($candidate)
         $versionText = (Get-Item -LiteralPath $resolved).VersionInfo.FileVersion
         $versionMatch = [regex]::Match([string]$versionText, '\d+(?:\.\d+){1,3}')
         if (-not $versionMatch.Success) {
-            throw "Cannot determine the Inno Setup compiler version at '$resolved'."
+            $rejected.Add("$resolved (unknown version)")
+            continue
         }
         if ([version]$versionMatch.Value -lt [version]'6.3') {
-            throw "Inno Setup 6.3 or later is required; found $($versionMatch.Value) at '$resolved'."
+            $rejected.Add("$resolved ($($versionMatch.Value))")
+            continue
         }
         return $resolved
     }
-    throw "Inno Setup 6.3 or later compiler (ISCC.exe) was not found. Install Inno Setup 6.3+ or pass -InstallerCompiler."
+    $detail = if ($rejected.Count) { " Rejected candidates: $($rejected -join '; ')." } else { '' }
+    throw "Inno Setup 6.3 or later compiler (ISCC.exe) was not found. Install Inno Setup 6.3+ or pass -InstallerCompiler.$detail"
 }
 
 function Test-CpcvExecutableHeader {
