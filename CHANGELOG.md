@@ -7,6 +7,14 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.4.1 - 2026-09-09
+
+### Fixed
+
+- Homebrew now installs the macOS release ZIP from Homebrew's staged archive
+  root, so `brew install thapecroth/cpcv/cpcv` no longer looks for a nonexistent
+  nested `cpcv` directory.
+
 ## v0.4.0 - 2026-09-07
 
 ### Added

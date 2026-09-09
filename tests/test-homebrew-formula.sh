@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Static, network-free checks for the release-generated Homebrew formula.
+# Network-free checks for the release-generated Homebrew formula.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -50,5 +50,65 @@ ruby -c "$formula" >/dev/null
 if /usr/bin/grep -Eq '__VERSION__|__MACOS_SHA256__' "$formula"; then
   die 'Formula placeholders were not replaced.'
 fi
+if /usr/bin/grep -Fq -- 'buildpath/"cpcv"' "$formula"; then
+  die 'Formula incorrectly expects a nested cpcv directory after Homebrew staging.'
+fi
+/usr/bin/grep -Fq -- 'source_root = buildpath' "$formula" || \
+  die "Formula does not install from Homebrew's staged archive root."
+/usr/bin/grep -Fq -- 'entry.basename.to_s == ".brew_home"' "$formula" || \
+  die "Formula does not exclude Homebrew's transient build home."
+/usr/bin/grep -Fq -- 'bin.mkpath' "$formula" || \
+  die 'Formula does not create its wrapper directory.'
 
-printf '%s\n' 'PASS: Homebrew formula template and setup helper are syntactically valid.'
+if command -v brew >/dev/null 2>&1 && command -v zip >/dev/null 2>&1; then
+  fixture_root="$temporary/fixture"
+  fixture_archive="$temporary/cpcv-fixture.zip"
+  /bin/mkdir -p -- "$fixture_root/cpcv/macos"
+  for target in cpcv-macos-ctl.sh cpcv-homebrew-setup.sh deploy-remote-tmux-cpcv-plugin.sh; do
+    target_path="$fixture_root/cpcv/macos/$target"
+    printf '%s\n' '#!/bin/sh' 'exit 0' > "$target_path"
+    /bin/chmod 755 "$target_path"
+  done
+  (
+    cd "$fixture_root"
+    zip -q -r "$fixture_archive" cpcv
+  )
+
+  brew ruby -e '
+require "formulary"
+require "tmpdir"
+require "unpack_strategy"
+archive = Pathname.new(ARGV.fetch(0))
+formula_path = Pathname.new(ARGV.fetch(1))
+Dir.mktmpdir("cpcv-homebrew-stage") do |stage|
+  Dir.chdir(stage) do
+    UnpackStrategy.detect(archive, prioritize_extension: true).extract_nestedly
+    entries = Dir["*"]
+    raise "expected one cpcv archive root, got #{entries.inspect}" unless entries == ["cpcv"]
+    Dir.chdir("cpcv") do
+      buildpath = Pathname.pwd
+      (buildpath/".brew_home").mkpath
+      Dir.mktmpdir("cpcv-homebrew-prefix") do |prefix_path|
+        prefix = Pathname.new(prefix_path)
+        formula = Formulary.from_contents("cpcv", formula_path, formula_path.read)
+        formula.define_singleton_method(:prefix) { prefix }
+        formula.buildpath = buildpath
+        formula.install
+
+        %w[cpcv cpcv-setup cpcv-deploy-tmux].each do |name|
+          wrapper = prefix/"bin"/name
+          raise "missing executable wrapper: #{name}" unless wrapper.executable?
+          raise "wrapper failed: #{name}" unless system(wrapper, "--help")
+        end
+        raise "transient .brew_home was packaged" if (prefix/"libexec"/".brew_home").exist?
+        raise "macOS controller was not packaged" unless (prefix/"libexec"/"macos"/"cpcv-macos-ctl.sh").executable?
+      end
+    end
+  end
+end
+' "$fixture_archive" "$formula"
+else
+  printf '%s\n' 'SKIP: Homebrew staged-install harness requires brew and zip.'
+fi
+
+printf '%s\n' 'PASS: Homebrew formula template, staging, and setup helper are valid.'
