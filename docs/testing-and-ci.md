@@ -58,7 +58,11 @@ a clean committed-tree export and checks its packaged bootstrap policy.
 `macos/build-macos.sh` constructs release bundles from `git archive` plus
 universal arm64/x86_64 binaries, verifies their code signatures and self-tests,
 then checks that the ZIP excludes local state. The macOS test entry point also
-renders a representative Homebrew formula and verifies its Ruby syntax.
+renders a representative Homebrew formula and verifies its Ruby syntax. When
+Homebrew is available, it also stages a synthetic single-root ZIP, evaluates
+the formula's `install`, and verifies its wrappers and payload: Homebrew enters
+the release ZIP's single top-level directory before evaluating `install`, and
+its transient `.brew_home` is never copied into the package.
 
 ## Release CI
 

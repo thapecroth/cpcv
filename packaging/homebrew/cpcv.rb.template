@@ -8,9 +8,12 @@ class Cpcv < Formula
   depends_on macos: :big_sur
 
   def install
-    source_root = buildpath/"cpcv"
-    odie "cpcv release archive is missing its expected root directory" unless source_root.directory?
-    libexec.install source_root.children
+    # Homebrew enters the archive's single top-level directory before calling
+    # install, so buildpath is already the cpcv release root.
+    source_root = buildpath
+    odie "cpcv release archive is missing its macOS payload" unless (source_root/"macos").directory?
+    libexec.install source_root.children.reject { |entry| entry.basename.to_s == ".brew_home" }
+    bin.mkpath
 
     wrappers = {
       "cpcv" => libexec/"macos/cpcv-macos-ctl.sh",
