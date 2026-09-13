@@ -53,7 +53,8 @@ remain available for people who prefer them or need an offline install.
 > - Have a normal SSH connection to a POSIX host. `tmux` is required on that
 >   host only for pane-specific `Ctrl-V` paste.
 > - Replace `image-box` below with your own working SSH alias or host. Confirm
->   it works with `ssh image-box true` before depending on cpcv.
+>   it works without an interactive prompt using
+>   `ssh -o BatchMode=yes image-box true` before depending on cpcv.
 
 ### 1. Choose an install
 
@@ -78,16 +79,24 @@ can still ask for explicit approval after verification.
 #### Windows setup wizard (recommended)
 
 Download `cpcv-vX.Y.Z-windows-setup.exe`, verify its SHA-256 entry in
-`SHA256SUMS.txt`, and run it. The first setup asks for an SSH alias/host and a
-relative remote image folder; use the SSH configuration already on your
-computer for passwords, keys, and proxy rules. The optional tmux helper task is
-off by default. Existing cpcv private configuration is preserved.
+`SHA256SUMS.txt`, and run it. After copying cpcv, Setup opens a short connection
+guide. Enter the SSH connection name you would use with `ssh <name>` (for
+example, `image-box` or `me@image-box`) and a relative remote image folder.
+Use an SSH config alias for a custom port or proxy; keep passwords, keys, and
+proxy rules in your normal SSH configuration. Existing private cpcv settings
+are preserved.
+
+The final setup-status page tells you whether the local watcher and tray app
+started, whether the SSH computer accepted a non-interactive connection,
+whether `tmux` is installed there, and whether the optional cpcv tmux plugin
+files were installed. The tmux plugin task is off by default and Setup never
+edits the remote `~/.tmux.conf`.
 
 Setup starts the watcher and branded tray icon now and at sign-in. Confirm your
 target when it is ready:
 
 ```powershell
-ssh image-box true
+ssh -o BatchMode=yes image-box true
 ```
 
 #### Windows portable ZIP (advanced)

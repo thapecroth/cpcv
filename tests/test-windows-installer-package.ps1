@@ -29,7 +29,13 @@ foreach ($required in @(
     'DefaultDirName={localappdata}\Programs\cpcv',
     'DisableDirPage=yes',
     'Flags: unchecked',
-    'Install optional cpcv tmux helpers on my SSH host',
+    'Install the optional cpcv tmux plugin on my SSH computer',
+    'CreateInputQueryPage(wpInstalling',
+    'CreateOutputMsgMemoPage',
+    'Connection and tmux readiness',
+    'SSH connection name:',
+    '-StatusFile',
+    'WizardSilent',
     '-ExecutionPolicy RemoteSigned',
     'uninstall-tray.ps1',
     'uninstall-autostart.ps1',
@@ -51,16 +57,24 @@ foreach ($required in @(
     'uninstall-tray.ps1',
     'install-autostart.ps1',
     'install-tray.ps1',
-    'DeployRemoteHelpers'
+    'DeployRemoteHelpers',
+    'StatusFile',
+    'Write-CpcvInstallerStatus',
+    'Get-CpcvInstallerRemoteCapabilities',
+    'CPCV_TMUX=installed',
+    'CPCV_PLUGIN=installed',
+    'BatchMode=yes'
 )) {
     Assert-CpcvInstallerPackage ($bootstrap.Contains($required)) "Installer bootstrap is missing required behavior: $required"
 }
 Assert-CpcvInstallerPackage ($bootstrap -notmatch '(?i)invoke-expression|executionpolicy\s+bypass') 'Installer bootstrap must not use dynamic evaluation or execution-policy bypass.'
 $localInstallIndex = $bootstrap.IndexOf('& $localInstaller *>&1 | Out-Null')
 $trayInstallIndex = $bootstrap.IndexOf('& $trayInstaller -Confirm:$false *>&1 | Out-Null')
+$remoteProbeIndex = $bootstrap.IndexOf('$remoteCapabilities = Get-CpcvInstallerRemoteCapabilities')
 $remoteHelperIndex = $bootstrap.IndexOf('& $localInstaller -DeployRemoteHelpers *>&1 | Out-Null')
-Assert-CpcvInstallerPackage ($localInstallIndex -ge 0 -and $trayInstallIndex -gt $localInstallIndex -and $remoteHelperIndex -gt $trayInstallIndex) 'Optional remote helpers must run only after the local watcher and tray are ready.'
+Assert-CpcvInstallerPackage ($localInstallIndex -ge 0 -and $trayInstallIndex -gt $localInstallIndex -and $remoteProbeIndex -gt $trayInstallIndex -and $remoteHelperIndex -gt $remoteProbeIndex) 'Remote capability checks and optional helpers must run only after the local watcher and tray are ready.'
 Assert-CpcvInstallerPackage ($bootstrap.Contains('RemoteHelpersWarning')) 'Optional remote-helper failure must not be reported as a local install failure.'
+Assert-CpcvInstallerPackage ($bootstrap.Contains('Not installed (SSH not connected)')) 'The setup summary must distinguish an unavailable SSH target from a successful tmux-plugin installation.'
 
 foreach ($required in @(
     '[switch]$IncludeInstaller',

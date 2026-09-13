@@ -7,6 +7,22 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.5.0 - 2026-09-12
+
+### Added
+
+- Windows Setup now finishes copying cpcv before opening a connection guide for
+  the SSH computer name and remote image folder.
+- The Windows installer now verifies the configured non-interactive SSH
+  connection and reports local watcher, tray, remote tmux, and cpcv tmux-plugin
+  status in a post-install readiness summary.
+
+### Changed
+
+- Windows Setup explains that SSH config aliases handle custom ports and proxy
+  rules, and that the optional tmux plugin installs files without changing the
+  user's remote tmux configuration.
+
 ## v0.4.1 - 2026-09-09
 
 ### Fixed
