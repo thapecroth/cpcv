@@ -99,6 +99,14 @@ target when it is ready:
 ssh -o BatchMode=yes image-box true
 ```
 
+To change the SSH target or remote folder later, right-click the cpcv tray icon
+and choose **Settings…**. The form validates the saved private configuration
+and restarts the owned local service when you save, so there is no need to edit
+`config.psd1` for routine changes. It warns when field-level `CPCV_*`
+environment variables override saved values or `CPCV_CONFIG` selects a
+different settings file. **View recent activity…** shows a bounded, redacted tail
+of local activity instead of opening the raw log file.
+
 #### Windows portable ZIP (advanced)
 
 Open PowerShell in the extracted `cpcv-windows` folder and run:
@@ -221,12 +229,12 @@ server to run or account to create.
 | Uploads are not completing | Verify `ssh image-box true`, then open the cpcv status view and check the private configuration. |
 | `Ctrl-V` does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"`. |
 | tmux says `no image` | Copy an image locally and wait for the first upload. |
-| You changed server or remote folder | Update macOS Settings or Windows `config.psd1`, then redeploy the remote tmux helper to that target. |
+| You changed server or remote folder | Update **Settings…** in the macOS menu bar or Windows tray, then redeploy the remote tmux helper to that target. |
 
 On macOS, `bash macos/cpcv-macos-ctl.sh doctor` checks the local service, SSH
 reachability, remote directory, and clock synchronization. On Windows,
 right-click the tray icon and choose **View status** for the dashboard,
-configuration, logs, and service controls.
+**Settings…**, **View recent activity…**, and service controls.
 
 You can customize tmux before its `run-shell` line:
 

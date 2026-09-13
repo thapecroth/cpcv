@@ -10,6 +10,17 @@ $script:CpcvConfigPath = if ($env:CPCV_CONFIG) {
 else {
     $script:CpcvDefaultConfigPath
 }
+$script:CpcvPersistedConfigFields = @(
+    "HostAlias", "RemoteDir", "RemoteHome", "DataRoot", "CommandTimeoutSeconds",
+    "MaxCommandOutputBytes", "PollIntervalSeconds", "WatchdogCheckSeconds",
+    "WatchdogStaleSeconds", "MaxLogBytes", "MaxCacheFiles", "MaxCacheBytes",
+    "MaxImageBytes"
+)
+$script:CpcvNumericConfigFields = @(
+    "CommandTimeoutSeconds", "MaxCommandOutputBytes", "PollIntervalSeconds",
+    "WatchdogCheckSeconds", "WatchdogStaleSeconds", "MaxLogBytes", "MaxCacheFiles",
+    "MaxCacheBytes", "MaxImageBytes"
+)
 
 function Get-CpcvConfigPath { return $script:CpcvConfigPath }
 
@@ -107,24 +118,177 @@ function Test-CpcvConfigValue {
     return ""
 }
 
-function Get-CpcvConfig {
-    $cfg = New-CpcvDefaultConfig
-    $allowed = @("HostAlias", "RemoteDir", "RemoteHome", "DataRoot", "CommandTimeoutSeconds", "MaxCommandOutputBytes", "PollIntervalSeconds", "WatchdogCheckSeconds", "WatchdogStaleSeconds", "MaxLogBytes", "MaxCacheFiles", "MaxCacheBytes", "MaxImageBytes")
-    if (Test-Path -LiteralPath $script:CpcvConfigPath) {
+function Get-CpcvConfigStoragePathInfo {
+    <#
+    .SYNOPSIS
+    Resolves the private configuration location without following reparse
+    points.  Configuration is read at logon, so it must not be possible to
+    redirect it through a symlink or junction to an unexpected location.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "The cpcv configuration path is empty."
+    }
+    try {
+        $fullPath = [IO.Path]::GetFullPath($Path)
+    }
+    catch {
+        throw "The cpcv configuration path is not a valid Windows path."
+    }
+    $directory = [IO.Path]::GetDirectoryName($fullPath)
+    if ([string]::IsNullOrWhiteSpace($directory) -or [string]::IsNullOrWhiteSpace([IO.Path]::GetFileName($fullPath))) {
+        throw "The cpcv configuration path must name a file."
+    }
+
+    # Check every existing ancestor instead of merely the immediate parent:
+    # a junction higher in the tree would otherwise redirect a later create.
+    $currentDirectory = $directory
+    while ($currentDirectory) {
+        $directoryExists = $false
         try {
-            $loaded = Import-PowerShellDataFile -LiteralPath $script:CpcvConfigPath
-            foreach ($key in $allowed) {
-                if ($loaded.ContainsKey($key) -and $null -ne $loaded[$key]) { $cfg[$key] = $loaded[$key] }
+            $directoryAttributes = [IO.File]::GetAttributes($currentDirectory)
+            $directoryExists = $true
+        }
+        catch [IO.FileNotFoundException] { }
+        catch [IO.DirectoryNotFoundException] { }
+        if ($directoryExists) {
+            # GetAttributes sees a dangling link too, unlike Test-Path.
+            if (($directoryAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing to use a reparse-point configuration directory."
+            }
+            $directoryItem = Get-Item -LiteralPath $currentDirectory -Force -ErrorAction Stop
+            if (-not $directoryItem.PSIsContainer) {
+                throw "The cpcv configuration parent is not a directory."
             }
         }
-        catch {
-            $cfg.ConfigError = "Cannot read configuration '$script:CpcvConfigPath': $($_.Exception.Message)"
-            return $cfg
+        $parent = [IO.Directory]::GetParent($currentDirectory)
+        if ($null -eq $parent -or $parent.FullName -ieq $currentDirectory) { break }
+        $currentDirectory = $parent.FullName
+    }
+
+    $exists = $false
+    try {
+        $fileAttributes = [IO.File]::GetAttributes($fullPath)
+        $exists = $true
+    }
+    catch [IO.FileNotFoundException] { }
+    catch [IO.DirectoryNotFoundException] { }
+    if ($exists) {
+        if (($fileAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to use a reparse-point configuration file."
+        }
+        $fileItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+        if ($fileItem.PSIsContainer) {
+            throw "The cpcv configuration path names a directory."
         }
     }
-    else {
+
+    return [pscustomobject]@{
+        FullPath = $fullPath
+        Directory = $directory
+        Exists = [bool]$exists
+    }
+}
+
+function Initialize-CpcvConfigStorageDirectory {
+    param([Parameter(Mandatory)]$PathInfo)
+
+    # Validate the existing tree before creating anything, then validate every
+    # new component. This keeps the default first-run path safe as well as a
+    # caller-supplied CPCV_CONFIG location.
+    [void](Get-CpcvConfigStoragePathInfo -Path $PathInfo.FullPath)
+    $toCreate = [System.Collections.Generic.List[string]]::new()
+    $currentDirectory = $PathInfo.Directory
+    while (-not (Test-Path -LiteralPath $currentDirectory)) {
+        [void]$toCreate.Add($currentDirectory)
+        $parent = [IO.Directory]::GetParent($currentDirectory)
+        if ($null -eq $parent -or $parent.FullName -ieq $currentDirectory) {
+            throw "Cannot create the cpcv configuration directory."
+        }
+        $currentDirectory = $parent.FullName
+    }
+    for ($index = $toCreate.Count - 1; $index -ge 0; $index--) {
+        [void][IO.Directory]::CreateDirectory($toCreate[$index])
+        $created = Get-Item -LiteralPath $toCreate[$index] -Force -ErrorAction Stop
+        if (-not $created.PSIsContainer -or (($created.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "Refusing to create configuration in a reparse-point directory."
+        }
+    }
+    return (Get-CpcvConfigStoragePathInfo -Path $PathInfo.FullPath)
+}
+
+function Get-CpcvPersistedConfigValues {
+    $defaults = New-CpcvDefaultConfig
+    $values = [ordered]@{}
+    foreach ($key in $script:CpcvPersistedConfigFields) {
+        $values[$key] = $defaults[$key]
+    }
+
+    $pathInfo = $null
+    try {
+        $pathInfo = Get-CpcvConfigStoragePathInfo -Path $script:CpcvConfigPath
+    }
+    catch {
+        return [pscustomobject]@{
+            Values = $values
+            Path = $script:CpcvConfigPath
+            Exists = $false
+            LoadError = "Cannot read cpcv configuration: $($_.Exception.Message)"
+        }
+    }
+    if (-not $pathInfo.Exists) {
+        return [pscustomobject]@{
+            Values = $values
+            Path = $pathInfo.FullPath
+            Exists = $false
+            LoadError = ""
+        }
+    }
+
+    try {
+        # Import-PowerShellDataFile accepts only the constrained data-file
+        # language. Do not dot-source a user configuration file.
+        $pathInfo = Get-CpcvConfigStoragePathInfo -Path $pathInfo.FullPath
+        $loaded = Import-PowerShellDataFile -LiteralPath $pathInfo.FullPath -ErrorAction Stop
+        if ($loaded -isnot [System.Collections.IDictionary]) {
+            throw "The configuration must contain a PowerShell data hashtable."
+        }
+        foreach ($key in $script:CpcvPersistedConfigFields) {
+            if ($loaded.Contains($key) -and $null -ne $loaded[$key]) {
+                $values[$key] = $loaded[$key]
+            }
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Values = $values
+            Path = $pathInfo.FullPath
+            Exists = $true
+            LoadError = "Cannot read configuration '$($pathInfo.FullPath)': $($_.Exception.Message)"
+        }
+    }
+    return [pscustomobject]@{
+        Values = $values
+        Path = $pathInfo.FullPath
+        Exists = $true
+        LoadError = ""
+    }
+}
+
+function Get-CpcvConfig {
+    $cfg = New-CpcvDefaultConfig
+    $persisted = Get-CpcvPersistedConfigValues
+    if ($persisted.LoadError) {
+        $cfg.ConfigError = $persisted.LoadError
+        return $cfg
+    }
+    if (-not $persisted.Exists) {
         $cfg.ConfigError = "Configuration not found at '$script:CpcvConfigPath'. Copy cpcv.config.example.psd1 there and set HostAlias."
         return $cfg
+    }
+    foreach ($key in $script:CpcvPersistedConfigFields) {
+        $cfg[$key] = $persisted.Values[$key]
     }
 
     # Environment variables make automation and CI configuration possible without
@@ -135,7 +299,7 @@ function Get-CpcvConfig {
 
     $cfg.ConfigError = Test-CpcvConfigValue -Config $cfg
     if ($cfg.ConfigError) { return $cfg }
-    foreach ($name in @("CommandTimeoutSeconds", "MaxCommandOutputBytes", "PollIntervalSeconds", "WatchdogCheckSeconds", "WatchdogStaleSeconds", "MaxLogBytes", "MaxCacheFiles", "MaxCacheBytes", "MaxImageBytes")) {
+    foreach ($name in $script:CpcvNumericConfigFields) {
         $cfg[$name] = (ConvertTo-CpcvStrictInteger -Value $cfg[$name]).Value
     }
     $cfg.LocalCache = Join-Path $cfg.DataRoot "cache"
@@ -144,6 +308,168 @@ function Get-CpcvConfig {
     $cfg.LogFile = Join-Path $cfg.DataRoot "watch.log"
     $cfg.HeartbeatFile = Join-Path $cfg.DataRoot "watch.heartbeat"
     return $cfg
+}
+
+function ConvertTo-CpcvDataFileString {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    # Single-quoted PowerShell strings are data-only when embedded quotes are
+    # doubled. Values are independently validated before this is called; this
+    # encoding is an additional boundary that prevents a configuration value
+    # from breaking out into executable PowerShell syntax.
+    return ("'" + $Value.Replace("'", "''") + "'")
+}
+
+function ConvertTo-CpcvConfigDataFile {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Config)
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    [void]$lines.Add("@{")
+    foreach ($key in $script:CpcvPersistedConfigFields) {
+        if ($script:CpcvNumericConfigFields -contains $key) {
+            $value = ([int]$Config[$key]).ToString([Globalization.CultureInfo]::InvariantCulture)
+        }
+        else {
+            $value = ConvertTo-CpcvDataFileString -Value ([string]$Config[$key])
+        }
+        [void]$lines.Add("    $key = $value")
+    }
+    [void]$lines.Add("}")
+    return (($lines -join [Environment]::NewLine) + [Environment]::NewLine)
+}
+
+function Write-CpcvConfigDataFileAtomically {
+    param(
+        [Parameter(Mandatory)]$PathInfo,
+        [Parameter(Mandatory)][string]$Content
+    )
+
+    $pathInfo = Initialize-CpcvConfigStorageDirectory -PathInfo $PathInfo
+    $temporary = Join-Path $pathInfo.Directory (".{0}.{1}.tmp" -f [IO.Path]::GetFileName($pathInfo.FullPath), [Guid]::NewGuid().ToString("N"))
+    $backup = Join-Path $pathInfo.Directory (".{0}.{1}.bak" -f [IO.Path]::GetFileName($pathInfo.FullPath), [Guid]::NewGuid().ToString("N"))
+    $committed = $false
+    try {
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+        $stream = [IO.File]::Open($temporary, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush($true)
+        }
+        finally {
+            $stream.Dispose()
+        }
+
+        # Re-check the final path after writing the temporary file. The write
+        # never falls back to a delete-and-move sequence, which would lose
+        # atomicity and make it easier to replace an unexpected target.
+        $pathInfo = Get-CpcvConfigStoragePathInfo -Path $pathInfo.FullPath
+        if ($pathInfo.Exists) {
+            # File.Replace requires a concrete backup path on supported
+            # Windows/.NET combinations. It remains in the same verified
+            # directory and is removed only after a successful replacement.
+            [IO.File]::Replace($temporary, $pathInfo.FullPath, $backup, $true)
+        }
+        else {
+            [IO.File]::Move($temporary, $pathInfo.FullPath)
+        }
+        $committed = $true
+    }
+    finally {
+        if (-not $committed -and [IO.File]::Exists($temporary)) {
+            try { [IO.File]::Delete($temporary) } catch { }
+        }
+        if ($committed -and [IO.File]::Exists($backup)) {
+            try { [IO.File]::Delete($backup) } catch { }
+        }
+    }
+}
+
+function Get-CpcvEditableConfig {
+    <#
+    .SYNOPSIS
+    Returns the persisted, editable cpcv fields plus Settings UI metadata.
+
+    .DESCRIPTION
+    Environment overrides are deliberately reported but never folded into the
+    returned values: saving Settings must change the file, not accidentally
+    persist a transient CPCV_* override.
+    #>
+    $persisted = Get-CpcvPersistedConfigValues
+    $result = [ordered]@{}
+    foreach ($key in $script:CpcvPersistedConfigFields) {
+        $result[$key] = $persisted.Values[$key]
+    }
+
+    $overrides = [System.Collections.Generic.List[string]]::new()
+    # CPCV_CONFIG selects the backing file rather than overriding a field, but
+    # it is still important to surface it: Settings must explain why the file
+    # location differs from the normal per-user default.
+    if ($env:CPCV_CONFIG) { [void]$overrides.Add("CPCV_CONFIG") }
+    if ($env:CPCV_HOST_ALIAS) { [void]$overrides.Add("CPCV_HOST_ALIAS") }
+    if ($env:CPCV_REMOTE_DIR) { [void]$overrides.Add("CPCV_REMOTE_DIR") }
+    if ($env:CPCV_REMOTE_HOME) { [void]$overrides.Add("CPCV_REMOTE_HOME") }
+
+    $loadError = [string]$persisted.LoadError
+    if (-not $loadError -and $persisted.Exists) {
+        # Surface invalid stored values to Settings without replacing them on
+        # load. This preserves the user's other known fields so the form can
+        # repair only the value that needs attention.
+        $validationError = Test-CpcvConfigValue -Config $persisted.Values
+        if ($validationError) { $loadError = $validationError }
+    }
+    $result["Path"] = $persisted.Path
+    $result["Exists"] = [bool]$persisted.Exists
+    $result["HasEnvironmentOverrides"] = ($overrides.Count -gt 0)
+    $result["ConfigPathIsEnvironmentOverride"] = [bool]$env:CPCV_CONFIG
+    $result["EnvironmentOverrides"] = @($overrides)
+    $result["LoadError"] = $loadError
+    return $result
+}
+
+function Save-CpcvConfig {
+    <#
+    .SYNOPSIS
+    Validates and atomically saves editable cpcv configuration values.
+
+    .DESCRIPTION
+    The input may contain a subset of the known persisted fields. Missing
+    values are retained from a safe existing file or supplied from current
+    defaults. Derived local paths and ConfigError are never persisted.
+    #>
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Config)
+
+    $pathInfo = Get-CpcvConfigStoragePathInfo -Path $script:CpcvConfigPath
+    $persisted = Get-CpcvPersistedConfigValues
+    $candidate = [ordered]@{}
+    foreach ($key in $script:CpcvPersistedConfigFields) {
+        $candidate[$key] = $persisted.Values[$key]
+    }
+
+    $editableMetadataFields = @("Path", "Exists", "HasEnvironmentOverrides", "ConfigPathIsEnvironmentOverride", "EnvironmentOverrides", "LoadError")
+    foreach ($inputKey in $Config.Keys) {
+        $key = [string]$inputKey
+        # Callers may pass a modified object returned by Get-CpcvEditableConfig
+        # directly. Its read-only metadata is intentionally not persisted.
+        if ($editableMetadataFields -contains $key) { continue }
+        if ($script:CpcvPersistedConfigFields -notcontains $key) {
+            throw "'$key' is not an editable cpcv configuration field."
+        }
+        $candidate[$key] = $Config[$inputKey]
+    }
+
+    $validationError = Test-CpcvConfigValue -Config $candidate
+    if ($validationError) { throw $validationError }
+    foreach ($key in $script:CpcvNumericConfigFields) {
+        $candidate[$key] = (ConvertTo-CpcvStrictInteger -Value $candidate[$key]).Value
+    }
+
+    $content = ConvertTo-CpcvConfigDataFile -Config $candidate
+    Write-CpcvConfigDataFileAtomically -PathInfo $pathInfo -Content $content
+
+    # Keep this already-running process coherent with the saved file. The
+    # canonical loader intentionally reapplies environment overrides here.
+    $script:CpcvConfig = Get-CpcvConfig
+    return (Get-CpcvEditableConfig)
 }
 
 $script:CpcvConfig = Get-CpcvConfig

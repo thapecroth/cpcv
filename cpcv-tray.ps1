@@ -549,23 +549,384 @@ function Copy-CpcvTrayLatestPath {
     Set-Clipboard -Value $State.LatestPath
 }
 
-function Open-CpcvTrayLog {
-    $path = (Get-CpcvConfig).LogFile
-    $directory = Split-Path -Parent $path
-    if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
-    if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType File -Force -Path $path | Out-Null }
-    Start-Process -FilePath "notepad.exe" -ArgumentList @(('"{0}"' -f $path)) | Out-Null
+function Get-CpcvTrayRecentActivityText {
+    param(
+        [Parameter(Mandatory)]$Config,
+        [ValidateRange(1, 500)][int]$MaximumLines = 100,
+        [ValidateRange(1024, 1048576)][int]$MaximumBytes = 65536
+    )
+
+    $path = [string]$Config.LogFile
+    if ([string]::IsNullOrWhiteSpace($path)) { return "Recent activity is unavailable." }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return "No local activity has been recorded yet." }
+
+    $stream = $null
+    $reader = $null
+    try {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            return "Recent activity is unavailable because the log is not a regular file."
+        }
+
+        # Read only a bounded tail. The watcher can be writing at the same
+        # time, so permit a shared read but never create or modify the log.
+        $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        $offset = [Math]::Max([int64]0, $stream.Length - [int64]$MaximumBytes)
+        [void]$stream.Seek($offset, [IO.SeekOrigin]::Begin)
+        $reader = [IO.StreamReader]::new($stream, $true)
+        $text = $reader.ReadToEnd()
+        if ($offset -gt 0) {
+            # Discard the leading partial record after seeking into the file.
+            $newline = $text.IndexOf("`n")
+            if ($newline -ge 0) { $text = $text.Substring($newline + 1) }
+        }
+        $lines = @($text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last $MaximumLines)
+        if ($lines.Count -eq 0) { return "No local activity has been recorded yet." }
+        return (($lines | ForEach-Object {
+            ConvertTo-CpcvTrayDisplayText -Text $_ -MaximumLength 1200
+        }) -join [Environment]::NewLine)
+    }
+    catch {
+        # Do not surface a file path or unbounded OS exception in a UI that is
+        # routinely opened from the notification area.
+        return "Recent activity is temporarily unavailable."
+    }
+    finally {
+        if ($reader) { $reader.Dispose() }
+        elseif ($stream) { $stream.Dispose() }
+    }
 }
 
-function Open-CpcvTrayConfig {
-    $path = Get-CpcvConfigPath
-    $directory = Split-Path -Parent $path
-    if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
-    if (-not (Test-Path -LiteralPath $path)) {
-        $example = Join-Path $PSScriptRoot "cpcv.config.example.psd1"
-        Copy-Item -LiteralPath $example -Destination $path -Force
+function Show-CpcvTrayRecentActivityWindow {
+    param([switch]$TestMode)
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $form = $null
+    try {
+        $form = New-Object System.Windows.Forms.Form
+        $form.Name = "cpcvTrayRecentActivityWindow"
+        $form.Text = "cpcv recent activity"
+        $form.StartPosition = if ($TestMode) { [System.Windows.Forms.FormStartPosition]::Manual } else { [System.Windows.Forms.FormStartPosition]::CenterScreen }
+        if ($TestMode) {
+            $form.Opacity = 0
+            $form.ShowInTaskbar = $false
+            $form.Location = New-Object System.Drawing.Point(-32000, -32000)
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(760, 500)
+        $form.MinimumSize = New-Object System.Drawing.Size(620, 400)
+        $form.BackColor = Get-CpcvTrayColor "#F6F8FC"
+        $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+
+        $title = New-Object System.Windows.Forms.Label
+        $title.Name = "cpcvTrayRecentActivityTitle"
+        $title.Text = "Recent activity"
+        $title.AutoSize = $true
+        $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 17)
+        $title.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $title.Location = New-Object System.Drawing.Point(22, 18)
+        $form.Controls.Add($title)
+
+        $subtitle = New-Object System.Windows.Forms.Label
+        $subtitle.Name = "cpcvTrayRecentActivitySubtitle"
+        $subtitle.Text = "The latest 100 local records are shown here. Sensitive values are redacted."
+        $subtitle.AutoSize = $true
+        $subtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $subtitle.ForeColor = Get-CpcvTrayColor "#64748B"
+        $subtitle.Location = New-Object System.Drawing.Point(24, 50)
+        $form.Controls.Add($subtitle)
+
+        $activity = New-Object System.Windows.Forms.TextBox
+        $activity.Name = "cpcvTrayRecentActivityTextBox"
+        $activity.Multiline = $true
+        $activity.ReadOnly = $true
+        $activity.ScrollBars = [System.Windows.Forms.ScrollBars]::Both
+        $activity.WordWrap = $false
+        $activity.Font = New-Object System.Drawing.Font("Cascadia Mono", 9)
+        $activity.BackColor = [System.Drawing.Color]::White
+        $activity.ForeColor = Get-CpcvTrayColor "#1E293B"
+        $activity.Location = New-Object System.Drawing.Point(24, 82)
+        $activity.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $activity.Size = New-Object System.Drawing.Size(712, 352)
+        $form.Controls.Add($activity)
+
+        $refresh = New-Object System.Windows.Forms.Button
+        $refresh.Name = "cpcvTrayRecentActivityRefreshButton"
+        $refresh.Text = "Refresh"
+        $refresh.Size = New-Object System.Drawing.Size(104, 32)
+        $refresh.Location = New-Object System.Drawing.Point(520, 450)
+        $refresh.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $refresh -Kind Secondary
+        $form.Controls.Add($refresh)
+
+        $close = New-Object System.Windows.Forms.Button
+        $close.Name = "cpcvTrayRecentActivityCloseButton"
+        $close.Text = "Close"
+        $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $close.Size = New-Object System.Drawing.Size(104, 32)
+        $close.Location = New-Object System.Drawing.Point(632, 450)
+        $close.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $close -Kind Quiet
+        $form.Controls.Add($close)
+        $form.CancelButton = $close
+
+        $reload = {
+            $cfg = Get-CpcvConfig
+            $activity.Text = Get-CpcvTrayRecentActivityText -Config $cfg
+            $activity.SelectionStart = $activity.TextLength
+            $activity.ScrollToCaret()
+        }.GetNewClosure()
+        $refresh.Add_Click({ & $reload })
+        $form.Add_KeyDown({ if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $form.Close() } })
+
+        & $reload
+        [void]$form.ShowDialog()
     }
-    Start-Process -FilePath "notepad.exe" -ArgumentList @(('"{0}"' -f $path)) | Out-Null
+    finally {
+        if ($form) { $form.Dispose() }
+    }
+}
+
+function Add-CpcvTraySettingsField {
+    param(
+        [Parameter(Mandatory)][System.Windows.Forms.TableLayoutPanel]$Panel,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Inputs,
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$Label,
+        [AllowNull()]$Value
+    )
+
+    $row = $Panel.RowCount
+    $Panel.RowCount = $row + 1
+    [void]$Panel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::AutoSize)))
+
+    $fieldLabel = New-Object System.Windows.Forms.Label
+    $fieldLabel.Name = "cpcvTraySettings$($Key)Label"
+    $fieldLabel.Text = $Label
+    $fieldLabel.AutoSize = $true
+    $fieldLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Left
+    $fieldLabel.Margin = New-Object System.Windows.Forms.Padding(0, 8, 14, 8)
+    $fieldLabel.ForeColor = Get-CpcvTrayColor "#334155"
+    $Panel.Controls.Add($fieldLabel, 0, $row)
+
+    $input = New-Object System.Windows.Forms.TextBox
+    $input.Name = "cpcvTraySettings$($Key)Input"
+    $input.Text = [string]$Value
+    $input.Dock = [System.Windows.Forms.DockStyle]::Fill
+    $input.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 4)
+    $input.MaxLength = 1024
+    $Panel.Controls.Add($input, 1, $row)
+    $Inputs[$Key] = $input
+}
+
+function Show-CpcvTraySettingsWindow {
+    param([switch]$TestMode)
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $form = $null
+    try {
+        $editable = Get-CpcvEditableConfig
+        $inputs = [ordered]@{}
+        $form = New-Object System.Windows.Forms.Form
+        $form.Name = "cpcvTraySettingsWindow"
+        $form.Text = "cpcv settings"
+        $form.StartPosition = if ($TestMode) { [System.Windows.Forms.FormStartPosition]::Manual } else { [System.Windows.Forms.FormStartPosition]::CenterScreen }
+        if ($TestMode) {
+            $form.Opacity = 0
+            $form.ShowInTaskbar = $false
+            $form.Location = New-Object System.Drawing.Point(-32000, -32000)
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(800, 650)
+        $form.MinimumSize = New-Object System.Drawing.Size(680, 560)
+        $form.BackColor = Get-CpcvTrayColor "#F6F8FC"
+        $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+        $form.KeyPreview = $true
+        $form.Tag = $false
+
+        $title = New-Object System.Windows.Forms.Label
+        $title.Name = "cpcvTraySettingsTitle"
+        $title.Text = "Settings"
+        $title.AutoSize = $true
+        $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 17)
+        $title.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $title.Location = New-Object System.Drawing.Point(24, 18)
+        $form.Controls.Add($title)
+
+        $subtitle = New-Object System.Windows.Forms.Label
+        $subtitle.Text = "Choose the SSH computer cpcv uses for automatic image uploads."
+        $subtitle.AutoSize = $true
+        $subtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $subtitle.ForeColor = Get-CpcvTrayColor "#64748B"
+        $subtitle.Location = New-Object System.Drawing.Point(26, 49)
+        $form.Controls.Add($subtitle)
+
+        $notice = New-Object System.Windows.Forms.Label
+        $notice.Name = "cpcvTraySettingsNotice"
+        $notice.AutoSize = $false
+        $notice.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $notice.ForeColor = Get-CpcvTrayColor "#334155"
+        $notice.BackColor = Get-CpcvTrayColor "#EEF2FF"
+        $notice.Padding = New-Object System.Windows.Forms.Padding(10, 8, 10, 8)
+        $notice.Location = New-Object System.Drawing.Point(24, 78)
+        $notice.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $notice.Size = New-Object System.Drawing.Size(752, 48)
+        if (-not [string]::IsNullOrWhiteSpace([string]$editable.LoadError)) {
+            $notice.Text = "The existing configuration could not be read. Enter valid settings below to repair it."
+            $notice.BackColor = Get-CpcvTrayColor "#FEF2F2"
+            $notice.ForeColor = Get-CpcvTrayColor "#991B1B"
+        }
+        elseif ($editable.HasEnvironmentOverrides) {
+            $fieldOverrides = @($editable.EnvironmentOverrides | Where-Object { $_ -ne "CPCV_CONFIG" })
+            $pathNotice = if ($editable.ConfigPathIsEnvironmentOverride) {
+                " Settings are saving to the configuration location selected by CPCV_CONFIG."
+            }
+            else { "" }
+            if ($fieldOverrides.Count -gt 0) {
+                $notice.Text = "Saved values are overridden for this session by: $($fieldOverrides -join ', '). Remove those environment variables for saved values to take effect.$pathNotice"
+            }
+            else {
+                $notice.Text = "This session uses the configuration location selected by CPCV_CONFIG. Saved settings will take effect from that location."
+            }
+            $notice.BackColor = Get-CpcvTrayColor "#FFFBEB"
+            $notice.ForeColor = Get-CpcvTrayColor "#92400E"
+        }
+        else {
+            $notice.Text = "Saved changes take effect after cpcv restarts its owned local service."
+        }
+        $form.Controls.Add($notice)
+
+        $tabs = New-Object System.Windows.Forms.TabControl
+        $tabs.Name = "cpcvTraySettingsTabs"
+        $tabs.Location = New-Object System.Drawing.Point(24, 142)
+        $tabs.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $tabs.Size = New-Object System.Drawing.Size(752, 422)
+        $form.Controls.Add($tabs)
+
+        $connectionTab = New-Object System.Windows.Forms.TabPage
+        $connectionTab.Name = "cpcvTraySettingsConnectionTab"
+        $connectionTab.Text = "Connection"
+        $connectionTab.Padding = New-Object System.Windows.Forms.Padding(18, 16, 18, 16)
+        $connectionTab.BackColor = [System.Drawing.Color]::White
+        $tabs.TabPages.Add($connectionTab)
+
+        $connectionLayout = New-Object System.Windows.Forms.TableLayoutPanel
+        $connectionLayout.Dock = [System.Windows.Forms.DockStyle]::Fill
+        $connectionLayout.AutoScroll = $true
+        $connectionLayout.ColumnCount = 2
+        $connectionLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Absolute, 205))) | Out-Null
+        $connectionLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+        $connectionTab.Controls.Add($connectionLayout)
+        Add-CpcvTraySettingsField -Panel $connectionLayout -Inputs $inputs -Key "HostAlias" -Label "SSH computer or alias" -Value $editable.HostAlias
+        Add-CpcvTraySettingsField -Panel $connectionLayout -Inputs $inputs -Key "RemoteDir" -Label "Remote image folder" -Value $editable.RemoteDir
+        Add-CpcvTraySettingsField -Panel $connectionLayout -Inputs $inputs -Key "RemoteHome" -Label "Remote home (optional)" -Value $editable.RemoteHome
+        Add-CpcvTraySettingsField -Panel $connectionLayout -Inputs $inputs -Key "PollIntervalSeconds" -Label "Upload interval (seconds)" -Value $editable.PollIntervalSeconds
+
+        $connectionTip = New-Object System.Windows.Forms.Label
+        $connectionTip.Name = "cpcvTraySettingsConnectionTip"
+        $connectionTip.Text = "Use the same connection name that works with ssh <name>. Use an SSH config alias for custom ports, keys, or proxy rules."
+        $connectionTip.AutoSize = $false
+        $connectionTip.ForeColor = Get-CpcvTrayColor "#64748B"
+        $connectionTip.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $connectionTip.Dock = [System.Windows.Forms.DockStyle]::Top
+        $connectionTip.Height = 46
+        $connectionTip.Padding = New-Object System.Windows.Forms.Padding(0, 12, 0, 0)
+        $connectionLayout.RowCount = $connectionLayout.RowCount + 1
+        [void]$connectionLayout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle -ArgumentList @([System.Windows.Forms.SizeType]::AutoSize)))
+        $connectionLayout.Controls.Add($connectionTip, 0, $connectionLayout.RowCount - 1)
+        $connectionLayout.SetColumnSpan($connectionTip, 2)
+
+        $advancedTab = New-Object System.Windows.Forms.TabPage
+        $advancedTab.Name = "cpcvTraySettingsAdvancedTab"
+        $advancedTab.Text = "Advanced"
+        $advancedTab.Padding = New-Object System.Windows.Forms.Padding(18, 16, 18, 16)
+        $advancedTab.BackColor = [System.Drawing.Color]::White
+        $tabs.TabPages.Add($advancedTab)
+
+        $advancedLayout = New-Object System.Windows.Forms.TableLayoutPanel
+        $advancedLayout.Dock = [System.Windows.Forms.DockStyle]::Fill
+        $advancedLayout.AutoScroll = $true
+        $advancedLayout.ColumnCount = 2
+        $advancedLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Absolute, 220))) | Out-Null
+        $advancedLayout.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle -ArgumentList @([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+        $advancedTab.Controls.Add($advancedLayout)
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "DataRoot" -Label "Local data folder" -Value $editable.DataRoot
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "CommandTimeoutSeconds" -Label "Command timeout (seconds)" -Value $editable.CommandTimeoutSeconds
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "MaxCommandOutputBytes" -Label "Max command output (bytes)" -Value $editable.MaxCommandOutputBytes
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "WatchdogCheckSeconds" -Label "Watchdog check (seconds)" -Value $editable.WatchdogCheckSeconds
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "WatchdogStaleSeconds" -Label "Watchdog stale after (seconds)" -Value $editable.WatchdogStaleSeconds
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "MaxLogBytes" -Label "Max activity log (bytes)" -Value $editable.MaxLogBytes
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "MaxCacheFiles" -Label "Max cached images" -Value $editable.MaxCacheFiles
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "MaxCacheBytes" -Label "Max cache (bytes)" -Value $editable.MaxCacheBytes
+        Add-CpcvTraySettingsField -Panel $advancedLayout -Inputs $inputs -Key "MaxImageBytes" -Label "Max image (bytes)" -Value $editable.MaxImageBytes
+
+        $feedback = New-Object System.Windows.Forms.Label
+        $feedback.Name = "cpcvTraySettingsFeedback"
+        $feedback.AutoEllipsis = $true
+        $feedback.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $feedback.ForeColor = Get-CpcvTrayColor "#B91C1C"
+        $feedback.Location = New-Object System.Drawing.Point(24, 576)
+        $feedback.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $feedback.Size = New-Object System.Drawing.Size(500, 36)
+        $form.Controls.Add($feedback)
+
+        $save = New-Object System.Windows.Forms.Button
+        $save.Name = "cpcvTraySettingsSaveButton"
+        $save.Text = "Save and restart"
+        $save.Size = New-Object System.Drawing.Size(132, 34)
+        $save.Location = New-Object System.Drawing.Point(532, 580)
+        $save.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $save -Kind Primary
+        $form.Controls.Add($save)
+
+        $close = New-Object System.Windows.Forms.Button
+        $close.Name = "cpcvTraySettingsCloseButton"
+        $close.Text = "Cancel"
+        $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $close.Size = New-Object System.Drawing.Size(104, 34)
+        $close.Location = New-Object System.Drawing.Point(672, 580)
+        $close.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $close -Kind Quiet
+        $form.Controls.Add($close)
+        $form.CancelButton = $close
+
+        $save.Add_Click({
+            try {
+                $draft = [ordered]@{}
+                foreach ($key in @(
+                    "HostAlias", "RemoteDir", "RemoteHome", "DataRoot",
+                    "CommandTimeoutSeconds", "MaxCommandOutputBytes", "PollIntervalSeconds",
+                    "WatchdogCheckSeconds", "WatchdogStaleSeconds", "MaxLogBytes",
+                    "MaxCacheFiles", "MaxCacheBytes", "MaxImageBytes"
+                )) {
+                    $draft[$key] = $inputs[$key].Text.Trim()
+                }
+                [void](Save-CpcvConfig -Config $draft)
+                try {
+                    Restart-CpcvTrayService
+                }
+                catch {
+                    $feedback.Text = "Settings were saved, but cpcv could not restart. Use the service controls after resolving the local error."
+                    return
+                }
+                $form.Tag = $true
+                $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
+                $form.Close()
+            }
+            catch {
+                $feedback.Text = ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message -MaximumLength 440
+            }
+        }.GetNewClosure())
+        $form.Add_KeyDown({ if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $form.Close() } })
+
+        [void]$form.ShowDialog()
+        return [bool]$form.Tag
+    }
+    finally {
+        if ($form) { $form.Dispose() }
+    }
 }
 
 function Open-CpcvTrayDataFolder {
@@ -783,7 +1144,7 @@ function Show-CpcvTrayStatusWindow {
 
     $settingsButton = New-Object System.Windows.Forms.Button
     $settingsButton.Name = "cpcvTraySettingsButton"
-    $settingsButton.Text = "Open settings"
+    $settingsButton.Text = "Settings..."
     $settingsButton.Size = New-Object System.Drawing.Size(112, 30)
     $settingsButton.Location = New-Object System.Drawing.Point(20, 119)
     Set-CpcvTrayButtonStyle -Button $settingsButton -Kind Quiet
@@ -791,8 +1152,8 @@ function Show-CpcvTrayStatusWindow {
 
     $logButton = New-Object System.Windows.Forms.Button
     $logButton.Name = "cpcvTrayLogButton"
-    $logButton.Text = "Open log"
-    $logButton.Size = New-Object System.Drawing.Size(92, 30)
+    $logButton.Text = "View activity..."
+    $logButton.Size = New-Object System.Drawing.Size(120, 30)
     $logButton.Location = New-Object System.Drawing.Point(142, 119)
     Set-CpcvTrayButtonStyle -Button $logButton -Kind Quiet
     $actions.Controls.Add($logButton)
@@ -801,7 +1162,7 @@ function Show-CpcvTrayStatusWindow {
     $dataButton.Name = "cpcvTrayDataButton"
     $dataButton.Text = "Open data folder"
     $dataButton.Size = New-Object System.Drawing.Size(128, 30)
-    $dataButton.Location = New-Object System.Drawing.Point(244, 119)
+    $dataButton.Location = New-Object System.Drawing.Point(272, 119)
     Set-CpcvTrayButtonStyle -Button $dataButton -Kind Quiet
     $actions.Controls.Add($dataButton)
 
@@ -897,8 +1258,13 @@ function Show-CpcvTrayStatusWindow {
         }
         catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
-    $settingsButton.Add_Click({ try { Open-CpcvTrayConfig } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
-    $logButton.Add_Click({ try { Open-CpcvTrayLog } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
+    $settingsButton.Add_Click({
+        try {
+            if (Show-CpcvTraySettingsWindow) { & $refreshDashboard (Get-CpcvTrayState) }
+        }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
+    })
+    $logButton.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
     $dataButton.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
 
     $close = New-Object System.Windows.Forms.Button
@@ -949,8 +1315,8 @@ function Start-CpcvTrayApplication {
         $stopItem = $menu.Items.Add("Stop service")
         $restartItem = $menu.Items.Add("Restart service")
         [void]$menu.Items.Add("-")
-        $logItem = $menu.Items.Add("Open log")
-        $configItem = $menu.Items.Add("Open configuration")
+        $logItem = $menu.Items.Add("View recent activity...")
+        $configItem = $menu.Items.Add("Settings...")
         $dataItem = $menu.Items.Add("Open data folder")
         [void]$menu.Items.Add("-")
         $exitItem = $menu.Items.Add("Exit tray (service stays running)")
@@ -995,8 +1361,8 @@ function Start-CpcvTrayApplication {
         $startItem.Add_Click({ try { [void](Start-CpcvTrayGuardian); & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
         $stopItem.Add_Click({ try { Stop-CpcvTrayService; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
         $restartItem.Add_Click({ try { Restart-CpcvTrayService; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
-        $logItem.Add_Click({ try { Open-CpcvTrayLog } catch { Show-CpcvTrayError $_.Exception.Message } })
-        $configItem.Add_Click({ try { Open-CpcvTrayConfig } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $logItem.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $configItem.Add_Click({ try { if (Show-CpcvTraySettingsWindow) { & $refreshUi } } catch { Show-CpcvTrayError $_.Exception.Message } })
         $dataItem.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError $_.Exception.Message } })
         $notify.Add_DoubleClick({ & $refreshUi; Show-CpcvTrayStatusWindow -State $script:CpcvTrayState })
         $exitItem.Add_Click({ $context.ExitThread() })

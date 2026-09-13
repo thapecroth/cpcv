@@ -29,8 +29,8 @@ The macOS parser accepts only JSON data and validates `hostAlias`, relative
 `remoteDir`, optional absolute POSIX `remoteHome`, data-root, size limits,
 timeouts, cache limits, and watchdog timing before launching SSH. A custom
 `CPCV_CONFIG` value must be an absolute local file path. Put credentials
-and `ProxyCommand` rules in your own SSH configuration, never in cpcv JSON
-or source.
+and `ProxyCommand` rules in your own SSH configuration, never in cpcv
+configuration data or source.
 
 ## macOS lifecycle
 
@@ -91,6 +91,14 @@ successful upload when the service is healthy, without revealing an SSH host or
 remote path.
 Neither interface accepts arbitrary commands, exposes raw SSH output in a
 tooltip, or holds SSH credentials.
+
+On Windows, **Settings…** is the normal way to change the SSH target, remote
+folder, timing, and storage limits. It validates the configuration before
+saving it and restarts the project-owned local service so a changed target takes
+effect. The form calls out field-level `CPCV_*` overrides that remain effective,
+as well as `CPCV_CONFIG` when it selects a non-default settings file. **View recent activity…**
+shows a bounded, redacted tail of the local activity log rather than opening the
+raw log or `config.psd1` in an editor.
 
 On macOS, the everyday menu contains a disabled status row, **Copy Last Image
 Path**, one contextual pause/resume action, **Check & Repair**, and **Settings**.
