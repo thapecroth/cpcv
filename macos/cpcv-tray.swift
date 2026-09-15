@@ -84,7 +84,7 @@ private struct TmuxBinding: Equatable {
         if secondaryTable != nil && secondaryKey != nil {
             return "macOS Ctrl-V and Windows Alt-V"
         }
-        table == "root" ? "raw Ctrl-V" : "tmux prefix, then \(key)"
+        return table == "root" ? "raw Ctrl-V" : "tmux prefix, then \(key)"
     }
 }
 
@@ -752,7 +752,9 @@ private final class TmuxSetupFormView: NSView {
             statusLabel.textColor = .secondaryLabelColor
             statusLabel.maximumNumberOfLines = 12
             statusLabel.preferredMaxLayoutWidth = 520
-            views.append(NSBox.separator())
+            let separator = NSBox()
+            separator.boxType = .separator
+            views.append(separator)
             views.append(statusLabel)
         }
         let startupLabel = NSTextField(wrappingLabelWithString: "Startup line (copy this into your own remote tmux config):\n\(tmuxStartupLine)")
