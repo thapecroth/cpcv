@@ -21,6 +21,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "cpcv-core.ps1")
+. (Join-Path $PSScriptRoot "cpcv-remote.ps1")
 
 function Get-CpcvTrayProcessProbe {
     param([Parameter(Mandatory)][string]$ScriptPath)
@@ -929,6 +930,705 @@ function Show-CpcvTraySettingsWindow {
     }
 }
 
+function Get-CpcvTrayTmuxStartupLine {
+    # This is deliberately only shown and copied. The customer owns their
+    # tmux startup file, and cpcv must not add or change a run-shell line.
+    return "run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux"
+}
+
+function Resolve-CpcvTrayTmuxPathInsertionChoice {
+    param(
+        [Parameter(Mandatory)][ValidateSet("CrossPlatform", "Recommended", "Custom", "RawCtrlV")][string]$Mode,
+        [AllowNull()][string]$CustomKey
+    )
+
+    switch ($Mode) {
+        "CrossPlatform" {
+            # This adds both root-table bindings to the same remote server;
+            # tmux does not identify a client's OS. Windows users press Alt-V
+            # (tmux M-v), while macOS users can press Ctrl-V (tmux C-v).
+            return [pscustomobject]@{
+                Table          = "root"
+                Key            = "C-v"
+                SecondaryTable = "root"
+                SecondaryKey   = "M-v"
+                Label          = "Windows Alt-V + macOS Ctrl-V"
+            }
+        }
+        "Recommended" {
+            return [pscustomobject]@{
+                Table          = "prefix"
+                Key            = "v"
+                SecondaryTable = ""
+                SecondaryKey   = ""
+                Label          = "tmux prefix, then v"
+            }
+        }
+        "Custom" {
+            $key = if ($null -eq $CustomKey) { "" } else { $CustomKey.Trim() }
+            if ($key -notmatch '^[a-z0-9]$') {
+                throw "Choose one lowercase letter or number for the custom tmux prefix key."
+            }
+            return [pscustomobject]@{
+                Table          = "prefix"
+                Key            = $key
+                SecondaryTable = ""
+                SecondaryKey   = ""
+                Label          = "tmux prefix, then $key"
+            }
+        }
+        "RawCtrlV" {
+            return [pscustomobject]@{
+                Table          = "root"
+                Key            = "C-v"
+                SecondaryTable = ""
+                SecondaryKey   = ""
+                Label          = "raw Ctrl-V"
+            }
+        }
+    }
+}
+
+function Get-CpcvTrayTmuxStateValue {
+    param(
+        [AllowNull()][object]$State,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowEmptyString()][string]$Fallback = ""
+    )
+
+    if ($null -eq $State) { return $Fallback }
+    if ($State -is [System.Collections.IDictionary]) {
+        if ($State.Contains($Name) -and $null -ne $State[$Name]) { return [string]$State[$Name] }
+        return $Fallback
+    }
+    $property = $State.PSObject.Properties[$Name]
+    if ($null -ne $property -and $null -ne $property.Value) { return [string]$property.Value }
+    return $Fallback
+}
+
+function Format-CpcvTrayTmuxState {
+    param([AllowNull()][object]$State)
+
+    if ($null -eq $State) { return "Remote setup has not been checked yet." }
+    $connection = Get-CpcvTrayTmuxStateValue -State $State -Name "Connection" -Fallback "Unavailable"
+    $tmux = Get-CpcvTrayTmuxStateValue -State $State -Name "Tmux" -Fallback "Unknown"
+    $plugin = Get-CpcvTrayTmuxStateValue -State $State -Name "Plugin" -Fallback "Unknown"
+    $server = Get-CpcvTrayTmuxStateValue -State $State -Name "Server" -Fallback "Unknown"
+    $table = Get-CpcvTrayTmuxStateValue -State $State -Name "Table" -Fallback "Unknown"
+    $key = Get-CpcvTrayTmuxStateValue -State $State -Name "Key" -Fallback "Unknown"
+    $binding = Get-CpcvTrayTmuxStateValue -State $State -Name "Binding" -Fallback "Unknown"
+    $secondaryTable = Get-CpcvTrayTmuxStateValue -State $State -Name "SecondaryTable"
+    $secondaryKey = Get-CpcvTrayTmuxStateValue -State $State -Name "SecondaryKey"
+    $secondaryBinding = Get-CpcvTrayTmuxStateValue -State $State -Name "SecondaryBinding" -Fallback "NotSelected"
+    $override = Get-CpcvTrayTmuxStateValue -State $State -Name "Override" -Fallback "None"
+    $detail = Get-CpcvTrayTmuxStateValue -State $State -Name "Detail"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    [void]$lines.Add("SSH: $connection    tmux: $tmux    plugin: $plugin")
+    [void]$lines.Add("Default server: $server    primary binding ($table/$key): $binding")
+    if ($secondaryTable -and $secondaryKey) {
+        [void]$lines.Add("Paired Windows Alt-V binding ($secondaryTable/$secondaryKey): $secondaryBinding")
+    }
+    if ($override -and $override -ne "None") {
+        [void]$lines.Add("A user-owned @cpcv-paste-* option is active and takes precedence over this screen.")
+    }
+    if ($detail) {
+        [void]$lines.Add((ConvertTo-CpcvTrayDisplayText -Text $detail -MaximumLength 480))
+    }
+    return ($lines -join [Environment]::NewLine)
+}
+
+function Start-CpcvTrayTmuxRemoteJob {
+    <#
+    .SYNOPSIS
+    Starts one remote tmux action outside the WinForms UI thread.
+
+    .DESCRIPTION
+    The remote helpers intentionally use bounded, synchronous SSH/SCP process
+    calls. They are safe to run in a non-interactive PowerShell job, but must
+    not run inside a button event handler: an Apply can require several
+    bounded remote calls. The child process reloads only this checkout's
+    cpcv-core and cpcv-remote helpers, so it shares the saved configuration
+    but cannot touch the tray's local uploader state.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet("Check", "Apply")][string]$Operation,
+        [Parameter(Mandatory)][string]$Table,
+        [Parameter(Mandatory)][string]$Key,
+        [AllowNull()][string]$SecondaryTable,
+        [AllowNull()][string]$SecondaryKey
+    )
+
+    $binding = Test-CpcvRemoteTmuxBinding -Table $Table -Key $Key -SecondaryTable $SecondaryTable -SecondaryKey $SecondaryKey
+    $root = [IO.Path]::GetFullPath($PSScriptRoot)
+    return Start-Job -Name ("cpcv-tmux-{0}" -f $Operation.ToLowerInvariant()) -ScriptBlock {
+        param(
+            [Parameter(Mandatory)][string]$CpcvRoot,
+            [Parameter(Mandatory)][string]$CpcvOperation,
+            [Parameter(Mandatory)][string]$CpcvTable,
+            [Parameter(Mandatory)][string]$CpcvKey,
+            [AllowNull()][string]$CpcvSecondaryTable,
+            [AllowNull()][string]$CpcvSecondaryKey
+        )
+
+        $ErrorActionPreference = "Stop"
+        . (Join-Path $CpcvRoot "cpcv-core.ps1")
+        . (Join-Path $CpcvRoot "cpcv-remote.ps1")
+        if ($CpcvOperation -eq "Check") {
+            return Get-CpcvRemoteTmuxState -Table $CpcvTable -Key $CpcvKey -SecondaryTable $CpcvSecondaryTable -SecondaryKey $CpcvSecondaryKey
+        }
+        return Apply-CpcvRemoteTmuxBinding -Table $CpcvTable -Key $CpcvKey -SecondaryTable $CpcvSecondaryTable -SecondaryKey $CpcvSecondaryKey
+    } -ArgumentList @($root, $Operation, $binding.Table, $binding.Key, $binding.SecondaryTable, $binding.SecondaryKey)
+}
+
+function Receive-CpcvTrayTmuxRemoteJob {
+    <#
+    .SYNOPSIS
+    Reads a completed remote tmux job without blocking the UI thread.
+
+    .DESCRIPTION
+    A non-completed job returns Completed = $false. Terminal jobs are removed
+    as soon as their final state has been collected, so opening the tmux
+    window repeatedly cannot accumulate background-job records.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][System.Management.Automation.Job]$Job)
+
+    if ($Job.State -notin @("Completed", "Failed", "Stopped", "Disconnected")) {
+        return [pscustomobject]@{ Completed = $false; Ok = $false; Result = $null; Detail = "" }
+    }
+
+    $records = @()
+    $errors = @()
+    try {
+        $records = @(Receive-Job -Job $Job -ErrorAction SilentlyContinue -ErrorVariable +errors)
+        $result = @($records | Where-Object {
+            $null -ne $_ -and $null -ne $_.PSObject.Properties["Ok"]
+        } | Select-Object -Last 1)[0]
+        if ($null -ne $result) {
+            return [pscustomobject]@{ Completed = $true; Ok = $true; Result = $result; Detail = "" }
+        }
+
+        $reason = ""
+        if ($Job.ChildJobs.Count -gt 0 -and $null -ne $Job.ChildJobs[0].JobStateInfo.Reason) {
+            $reason = [string]$Job.ChildJobs[0].JobStateInfo.Reason
+        }
+        if (-not [string]::IsNullOrWhiteSpace($reason)) {
+            $detail = $reason
+        }
+        elseif ($errors.Count -gt 0) {
+            $detail = [string]$errors[-1]
+        }
+        elseif ($Job.State -eq "Stopped") {
+            $detail = "The remote tmux operation was cancelled."
+        }
+        else {
+            $detail = "The remote tmux operation finished without a result."
+        }
+        return [pscustomobject]@{ Completed = $true; Ok = $false; Result = $null; Detail = $detail }
+    }
+    catch {
+        return [pscustomobject]@{ Completed = $true; Ok = $false; Result = $null; Detail = $_.Exception.Message }
+    }
+    finally {
+        try { Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue } catch { }
+    }
+}
+
+function Stop-CpcvTrayTmuxRemoteJob {
+    <#
+    .SYNOPSIS
+    Stops only the dedicated job created for the currently open tmux dialog.
+    #>
+    [CmdletBinding()]
+    param([AllowNull()][System.Management.Automation.Job]$Job)
+
+    if ($null -eq $Job) { return }
+    try {
+        if ($Job.State -notin @("Completed", "Failed", "Stopped", "Disconnected")) {
+            Stop-Job -Job $Job -ErrorAction SilentlyContinue
+        }
+    }
+    catch { }
+    try { Remove-Job -Job $Job -Force -ErrorAction SilentlyContinue } catch { }
+}
+
+function Show-CpcvTrayTmuxSetupWindow {
+    param(
+        # TestMode keeps the usual synthetic WinForms probe hidden. Its direct
+        # transport branch preserves the existing deterministic stub tests;
+        # UseAsyncWorker opts a probe into the production job/timer path.
+        [switch]$TestMode,
+        [switch]$UseAsyncWorker
+    )
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $form = $null
+    $operationTimer = $null
+    $operationState = $null
+    try {
+        $form = New-Object System.Windows.Forms.Form
+        $form.Name = "cpcvTrayTmuxSetupWindow"
+        $form.Text = "cpcv tmux path insertion"
+        $form.StartPosition = if ($TestMode) { [System.Windows.Forms.FormStartPosition]::Manual } else { [System.Windows.Forms.FormStartPosition]::CenterScreen }
+        if ($TestMode) {
+            $form.Opacity = 0
+            $form.ShowInTaskbar = $false
+            $form.Location = New-Object System.Drawing.Point(-32000, -32000)
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(760, 700)
+        $form.MinimumSize = New-Object System.Drawing.Size(780, 740)
+        $form.BackColor = Get-CpcvTrayColor "#F6F8FC"
+        $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+        $form.KeyPreview = $true
+        $form.Tag = $false
+
+        $title = New-Object System.Windows.Forms.Label
+        $title.Name = "cpcvTrayTmuxTitle"
+        $title.Text = "Tmux path insertion"
+        $title.AutoSize = $true
+        $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 17)
+        $title.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $title.Location = New-Object System.Drawing.Point(24, 18)
+        $form.Controls.Add($title)
+
+        $subtitle = New-Object System.Windows.Forms.Label
+        $subtitle.Name = "cpcvTrayTmuxSubtitle"
+        $subtitle.Text = "Choose how the remote tmux server inserts cpcv's latest image path. This is separate from the local uploader settings."
+        $subtitle.AutoSize = $false
+        $subtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $subtitle.ForeColor = Get-CpcvTrayColor "#64748B"
+        $subtitle.Location = New-Object System.Drawing.Point(26, 50)
+        $subtitle.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $subtitle.Size = New-Object System.Drawing.Size(708, 32)
+        $form.Controls.Add($subtitle)
+
+        $notice = New-Object System.Windows.Forms.Label
+        $notice.Name = "cpcvTrayTmuxNotice"
+        $notice.Text = "Check is read-only. Apply installs or updates only cpcv-owned remote plugin and configuration files; it never edits ~/.tmux.conf or restarts your local uploader."
+        $notice.AutoSize = $false
+        $notice.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $notice.ForeColor = Get-CpcvTrayColor "#334155"
+        $notice.BackColor = Get-CpcvTrayColor "#EEF2FF"
+        $notice.Padding = New-Object System.Windows.Forms.Padding(10, 8, 10, 8)
+        $notice.Location = New-Object System.Drawing.Point(24, 92)
+        $notice.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $notice.Size = New-Object System.Drawing.Size(712, 50)
+        $form.Controls.Add($notice)
+
+        $choiceLabel = New-Object System.Windows.Forms.Label
+        $choiceLabel.Text = "Path-insertion shortcut on the remote tmux server"
+        $choiceLabel.AutoSize = $true
+        $choiceLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
+        $choiceLabel.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $choiceLabel.Location = New-Object System.Drawing.Point(24, 158)
+        $form.Controls.Add($choiceLabel)
+
+        $crossPlatform = New-Object System.Windows.Forms.RadioButton
+        $crossPlatform.Name = "cpcvTrayTmuxCrossPlatformRadio"
+        $crossPlatform.Text = "Recommended: Windows Alt-V + macOS Ctrl-V"
+        $crossPlatform.AutoSize = $true
+        $crossPlatform.Location = New-Object System.Drawing.Point(28, 187)
+        $crossPlatform.Checked = $true
+        $form.Controls.Add($crossPlatform)
+
+        $crossPlatformHint = New-Object System.Windows.Forms.Label
+        $crossPlatformHint.Name = "cpcvTrayTmuxCrossPlatformHint"
+        $crossPlatformHint.Text = "Both shortcuts are installed for every connected client; tmux does not detect OS. On Windows, use Alt-V."
+        $crossPlatformHint.AutoSize = $false
+        $crossPlatformHint.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $crossPlatformHint.ForeColor = Get-CpcvTrayColor "#64748B"
+        $crossPlatformHint.Location = New-Object System.Drawing.Point(50, 211)
+        $crossPlatformHint.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $crossPlatformHint.Size = New-Object System.Drawing.Size(686, 19)
+        $form.Controls.Add($crossPlatformHint)
+
+        $recommended = New-Object System.Windows.Forms.RadioButton
+        $recommended.Name = "cpcvTrayTmuxRecommendedRadio"
+        $recommended.Text = "Alternative: tmux prefix, then v"
+        $recommended.AutoSize = $true
+        $recommended.Location = New-Object System.Drawing.Point(28, 237)
+        $form.Controls.Add($recommended)
+
+        $custom = New-Object System.Windows.Forms.RadioButton
+        $custom.Name = "cpcvTrayTmuxCustomRadio"
+        $custom.Text = "Custom: tmux prefix, then"
+        $custom.AutoSize = $true
+        $custom.Location = New-Object System.Drawing.Point(28, 266)
+        $form.Controls.Add($custom)
+
+        $customKey = New-Object System.Windows.Forms.TextBox
+        $customKey.Name = "cpcvTrayTmuxCustomKeyInput"
+        $customKey.Text = "v"
+        $customKey.CharacterCasing = [System.Windows.Forms.CharacterCasing]::Lower
+        $customKey.MaxLength = 1
+        $customKey.Enabled = $false
+        $customKey.Size = New-Object System.Drawing.Size(42, 25)
+        $customKey.Location = New-Object System.Drawing.Point(214, 262)
+        $customKey.TextAlign = [System.Windows.Forms.HorizontalAlignment]::Center
+        $form.Controls.Add($customKey)
+
+        $customHint = New-Object System.Windows.Forms.Label
+        $customHint.Text = "one lowercase letter or number"
+        $customHint.AutoSize = $true
+        $customHint.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $customHint.ForeColor = Get-CpcvTrayColor "#64748B"
+        $customHint.Location = New-Object System.Drawing.Point(266, 266)
+        $form.Controls.Add($customHint)
+
+        $raw = New-Object System.Windows.Forms.RadioButton
+        $raw.Name = "cpcvTrayTmuxRawRadio"
+        $raw.Text = "Advanced: raw Ctrl-V"
+        $raw.AutoSize = $true
+        $raw.Location = New-Object System.Drawing.Point(28, 295)
+        $form.Controls.Add($raw)
+
+        $rawWarning = New-Object System.Windows.Forms.Label
+        $rawWarning.Name = "cpcvTrayTmuxRawWarning"
+        $rawWarning.Text = "Warning: this replaces ordinary Ctrl-V in the remote tmux server for every connected client. Warp and other terminals can capture Ctrl-V locally before tmux sees it, so choose this only when you have configured your terminal to forward it."
+        $rawWarning.AutoSize = $false
+        $rawWarning.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $rawWarning.ForeColor = Get-CpcvTrayColor "#92400E"
+        $rawWarning.BackColor = Get-CpcvTrayColor "#FFFBEB"
+        $rawWarning.Padding = New-Object System.Windows.Forms.Padding(8, 6, 8, 6)
+        $rawWarning.Location = New-Object System.Drawing.Point(50, 322)
+        $rawWarning.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $rawWarning.Size = New-Object System.Drawing.Size(686, 46)
+        $rawWarning.Visible = $false
+        $form.Controls.Add($rawWarning)
+
+        $selection = New-Object System.Windows.Forms.Label
+        $selection.Name = "cpcvTrayTmuxSelectionText"
+        $selection.AutoSize = $false
+        $selection.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5)
+        $selection.ForeColor = Get-CpcvTrayColor "#3730A3"
+        $selection.Location = New-Object System.Drawing.Point(28, 377)
+        $selection.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $selection.Size = New-Object System.Drawing.Size(708, 22)
+        $form.Controls.Add($selection)
+
+        $statusLabel = New-Object System.Windows.Forms.Label
+        $statusLabel.Text = "Remote tmux status"
+        $statusLabel.AutoSize = $true
+        $statusLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
+        $statusLabel.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $statusLabel.Location = New-Object System.Drawing.Point(24, 407)
+        $form.Controls.Add($statusLabel)
+
+        $status = New-Object System.Windows.Forms.TextBox
+        $status.Name = "cpcvTrayTmuxStatusText"
+        $status.ReadOnly = $true
+        $status.Multiline = $true
+        $status.WordWrap = $true
+        $status.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+        $status.BackColor = [System.Drawing.Color]::White
+        $status.ForeColor = Get-CpcvTrayColor "#334155"
+        $status.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $status.Location = New-Object System.Drawing.Point(24, 431)
+        $status.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $status.Size = New-Object System.Drawing.Size(712, 88)
+        $status.Text = "Remote setup has not been checked yet."
+        $form.Controls.Add($status)
+
+        $startupLabel = New-Object System.Windows.Forms.Label
+        $startupLabel.Text = "To load cpcv automatically when tmux starts, add this one user-owned line to your remote tmux config:"
+        $startupLabel.AutoSize = $false
+        $startupLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $startupLabel.ForeColor = Get-CpcvTrayColor "#475569"
+        $startupLabel.Location = New-Object System.Drawing.Point(24, 530)
+        $startupLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $startupLabel.Size = New-Object System.Drawing.Size(712, 20)
+        $form.Controls.Add($startupLabel)
+
+        $startupLine = New-Object System.Windows.Forms.TextBox
+        $startupLine.Name = "cpcvTrayTmuxStartupLine"
+        $startupLine.ReadOnly = $true
+        $startupLine.Text = Get-CpcvTrayTmuxStartupLine
+        $startupLine.Font = New-Object System.Drawing.Font("Consolas", 9)
+        $startupLine.BackColor = [System.Drawing.Color]::White
+        $startupLine.Location = New-Object System.Drawing.Point(24, 553)
+        $startupLine.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $startupLine.Size = New-Object System.Drawing.Size(540, 26)
+        $form.Controls.Add($startupLine)
+
+        $copyStartup = New-Object System.Windows.Forms.Button
+        $copyStartup.Name = "cpcvTrayTmuxCopyStartupButton"
+        $copyStartup.Text = "Copy line"
+        $copyStartup.Size = New-Object System.Drawing.Size(102, 28)
+        $copyStartup.Location = New-Object System.Drawing.Point(574, 551)
+        $copyStartup.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $copyStartup -Kind Quiet
+        $form.Controls.Add($copyStartup)
+
+        $feedback = New-Object System.Windows.Forms.Label
+        $feedback.Name = "cpcvTrayTmuxFeedback"
+        $feedback.AutoSize = $false
+        $feedback.AutoEllipsis = $true
+        $feedback.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $feedback.ForeColor = Get-CpcvTrayColor "#475569"
+        $feedback.Location = New-Object System.Drawing.Point(24, 588)
+        $feedback.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $feedback.Size = New-Object System.Drawing.Size(348, 48)
+        $form.Controls.Add($feedback)
+
+        $check = New-Object System.Windows.Forms.Button
+        $check.Name = "cpcvTrayTmuxCheckButton"
+        $check.Text = "Check remote setup"
+        $check.Size = New-Object System.Drawing.Size(142, 34)
+        $check.Location = New-Object System.Drawing.Point(386, 650)
+        $check.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $check -Kind Secondary
+        $form.Controls.Add($check)
+
+        $apply = New-Object System.Windows.Forms.Button
+        $apply.Name = "cpcvTrayTmuxApplyButton"
+        $apply.Text = "Install / apply"
+        $apply.Size = New-Object System.Drawing.Size(126, 34)
+        $apply.Location = New-Object System.Drawing.Point(536, 650)
+        $apply.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $apply -Kind Primary
+        $form.Controls.Add($apply)
+
+        $close = New-Object System.Windows.Forms.Button
+        $close.Name = "cpcvTrayTmuxCloseButton"
+        $close.Text = "Close"
+        # Keep Close active during a remote operation so the user can cancel
+        # its dedicated background job and leave the dialog. It must not use a
+        # DialogResult, which would close before that cleanup can run.
+        $close.DialogResult = [System.Windows.Forms.DialogResult]::None
+        $close.Size = New-Object System.Drawing.Size(82, 34)
+        $close.Location = New-Object System.Drawing.Point(670, 650)
+        $close.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        Set-CpcvTrayButtonStyle -Button $close -Kind Quiet
+        $form.Controls.Add($close)
+        $form.CancelButton = $close
+
+        $getChoice = {
+            $mode = if ($crossPlatform.Checked) { "CrossPlatform" } elseif ($recommended.Checked) { "Recommended" } elseif ($custom.Checked) { "Custom" } else { "RawCtrlV" }
+            return Resolve-CpcvTrayTmuxPathInsertionChoice -Mode $mode -CustomKey $customKey.Text
+        }.GetNewClosure()
+        $syncChoice = {
+            $customKey.Enabled = $custom.Checked
+            $rawWarning.Visible = $raw.Checked
+            $crossPlatformHint.Visible = $crossPlatform.Checked
+            try {
+                $choice = & $getChoice
+                $selection.Text = "Selected: $($choice.Label)."
+            }
+            catch {
+                $selection.Text = ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message -MaximumLength 240
+            }
+        }.GetNewClosure()
+        $showState = {
+            param([AllowNull()][object]$State)
+            $status.Text = Format-CpcvTrayTmuxState -State $State
+            $status.SelectionStart = 0
+            $status.ScrollToCaret()
+        }.GetNewClosure()
+        $setBusy = {
+            param([bool]$Busy)
+            $check.Enabled = -not $Busy
+            $apply.Enabled = -not $Busy
+            $recommended.Enabled = -not $Busy
+            $crossPlatform.Enabled = -not $Busy
+            $custom.Enabled = -not $Busy
+            $raw.Enabled = -not $Busy
+            $customKey.Enabled = (-not $Busy -and $custom.Checked)
+            $close.Text = if ($Busy) { "Cancel and close" } else { "Close" }
+        }.GetNewClosure()
+        $showOperationFailure = {
+            param(
+                [Parameter(Mandatory)]$Choice,
+                [Parameter(Mandatory)][string]$Operation,
+                [AllowEmptyString()][string]$Detail
+            )
+
+            $safeDetail = ConvertTo-CpcvTrayDisplayText -Text $Detail -MaximumLength 340
+            $failureState = [pscustomobject]@{
+                Ok = $false; Connection = "Unavailable"; Tmux = "Unknown"; Plugin = "Unknown"; Server = "Unknown"
+                Table = $Choice.Table; Key = $Choice.Key; SecondaryTable = $Choice.SecondaryTable; SecondaryKey = $Choice.SecondaryKey
+                Binding = "Unknown"; SecondaryBinding = if ($Choice.SecondaryTable) { "Unknown" } else { "NotSelected" }; Override = "Unknown"; Detail = $safeDetail
+            }
+            & $showState $failureState
+            $feedback.ForeColor = Get-CpcvTrayColor "#B91C1C"
+            $verb = if ($Operation -eq "Check") { "check the remote setup" } else { "finish the remote tmux operation" }
+            $feedback.Text = if ($safeDetail) { "cpcv could not $verb. $safeDetail" } else { "cpcv could not $verb." }
+        }.GetNewClosure()
+        $renderCheck = {
+            param([Parameter(Mandatory)]$State)
+
+            & $showState $State
+            $feedback.ForeColor = if ($State.Ok) { Get-CpcvTrayColor "#0F766E" } else { Get-CpcvTrayColor "#B91C1C" }
+            $feedback.Text = if ($State.Ok) { "Remote setup checked. Apply remains an explicit action." } else { "cpcv could not check the remote setup. Review the status above." }
+        }.GetNewClosure()
+        $renderApply = {
+            param(
+                [Parameter(Mandatory)]$Result,
+                [Parameter(Mandatory)]$Choice
+            )
+
+            $resultState = $Result.PSObject.Properties["State"]
+            if ($null -ne $resultState -and $null -ne $resultState.Value) {
+                & $showState $resultState.Value
+            }
+            else {
+                $status.Text = "Selected: $($Choice.Label).`r`n" + (ConvertTo-CpcvTrayDisplayText -Text ([string]$Result.Detail) -MaximumLength 480)
+            }
+            if ($Result.Ok) {
+                $form.Tag = $true
+                $feedback.ForeColor = Get-CpcvTrayColor "#0F766E"
+                $feedback.Text = if ($Result.Applied) {
+                    "Applied now to the default tmux server. Copy the startup line so a future tmux server loads cpcv too."
+                }
+                elseif ($Result.Reason -eq "tmux-missing") {
+                    "Saved the cpcv setting, but tmux is not installed on the SSH computer yet. Copy the startup line for after tmux is installed."
+                }
+                else {
+                    "Saved the cpcv setting. No default tmux server was running to reload; copy the startup line for future servers."
+                }
+            }
+            else {
+                $feedback.ForeColor = Get-CpcvTrayColor "#B91C1C"
+                $feedback.Text = ConvertTo-CpcvTrayDisplayText -Text ([string]$Result.Detail) -MaximumLength 340
+            }
+        }.GetNewClosure()
+        $operationState = [ordered]@{
+            Job = $null
+            Operation = ""
+            Choice = $null
+            StartedAt = $null
+        }
+        $operationTimer = New-Object System.Windows.Forms.Timer
+        $operationTimer.Interval = 150
+        $operationTimer.Add_Tick({
+            $job = $operationState.Job
+            if ($null -eq $job) {
+                $operationTimer.Stop()
+                return
+            }
+
+            $completion = Receive-CpcvTrayTmuxRemoteJob -Job $job
+            if (-not $completion.Completed) {
+                if ($operationState.StartedAt -and ((Get-Date) - $operationState.StartedAt).TotalSeconds -ge 3) {
+                    $verb = if ($operationState.Operation -eq "Check") { "Checking remote tmux setup" } else { "Installing and applying the remote tmux setting" }
+                    $feedback.Text = "$verb... You can cancel and close this window while it is still working."
+                }
+                return
+            }
+
+            $operationTimer.Stop()
+            $operation = [string]$operationState.Operation
+            $choice = $operationState.Choice
+            $operationState.Job = $null
+            $operationState.Operation = ""
+            $operationState.Choice = $null
+            $operationState.StartedAt = $null
+            & $setBusy $false
+            if ($completion.Ok) {
+                if ($operation -eq "Check") { & $renderCheck $completion.Result }
+                else { & $renderApply $completion.Result $choice }
+            }
+            else {
+                & $showOperationFailure $choice $operation $completion.Detail
+            }
+        }.GetNewClosure())
+        $startAsyncOperation = {
+            param([Parameter(Mandatory)][ValidateSet("Check", "Apply")][string]$Operation)
+
+            try {
+                $choice = & $getChoice
+                & $setBusy $true
+                $feedback.ForeColor = Get-CpcvTrayColor "#3730A3"
+                $feedback.Text = if ($Operation -eq "Check") {
+                    "Checking remote tmux setup..."
+                }
+                else {
+                    "Installing and applying the remote tmux setting. This can take a few minutes..."
+                }
+                $operationState.Job = Start-CpcvTrayTmuxRemoteJob -Operation $Operation -Table $choice.Table -Key $choice.Key -SecondaryTable $choice.SecondaryTable -SecondaryKey $choice.SecondaryKey
+                $operationState.Operation = $Operation
+                $operationState.Choice = $choice
+                $operationState.StartedAt = Get-Date
+                $operationTimer.Start()
+            }
+            catch {
+                $choiceForError = if ($null -ne $choice) { $choice } else { [pscustomobject]@{ Table = ""; Key = "" } }
+                $operationState.Job = $null
+                & $setBusy $false
+                & $showOperationFailure $choiceForError $Operation $_.Exception.Message
+            }
+        }.GetNewClosure()
+
+        $crossPlatform.Add_CheckedChanged({ if ($crossPlatform.Checked) { & $syncChoice } }.GetNewClosure())
+        $recommended.Add_CheckedChanged({ if ($recommended.Checked) { & $syncChoice } }.GetNewClosure())
+        $custom.Add_CheckedChanged({ if ($custom.Checked) { & $syncChoice } }.GetNewClosure())
+        $raw.Add_CheckedChanged({ if ($raw.Checked) { & $syncChoice } }.GetNewClosure())
+        $customKey.Add_TextChanged({ if ($custom.Checked) { & $syncChoice } }.GetNewClosure())
+        $copyStartup.Add_Click({
+            try {
+                Set-Clipboard -Value $startupLine.Text
+                $feedback.ForeColor = Get-CpcvTrayColor "#0F766E"
+                $feedback.Text = "The startup line was copied. Add it to your own remote tmux configuration when you are ready."
+            }
+            catch {
+                $feedback.ForeColor = Get-CpcvTrayColor "#B91C1C"
+                $feedback.Text = ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message -MaximumLength 340
+            }
+        }.GetNewClosure())
+        if ($TestMode -and -not $UseAsyncWorker) {
+            # Keep synthetic UI probes deterministic and in-process. The real
+            # dialog takes the asynchronous branch below.
+            $check.Add_Click({
+                try {
+                    $choice = & $getChoice
+                    & $setBusy $true
+                    & $renderCheck (Get-CpcvRemoteTmuxState -Table $choice.Table -Key $choice.Key -SecondaryTable $choice.SecondaryTable -SecondaryKey $choice.SecondaryKey)
+                }
+                catch {
+                    $choiceForError = if ($null -ne $choice) { $choice } else { [pscustomobject]@{ Table = ""; Key = "" } }
+                    & $showOperationFailure $choiceForError "Check" $_.Exception.Message
+                }
+                finally { & $setBusy $false }
+            }.GetNewClosure())
+            $apply.Add_Click({
+                try {
+                    $choice = & $getChoice
+                    & $setBusy $true
+                    & $renderApply (Apply-CpcvRemoteTmuxBinding -Table $choice.Table -Key $choice.Key -SecondaryTable $choice.SecondaryTable -SecondaryKey $choice.SecondaryKey) $choice
+                }
+                catch {
+                    $choiceForError = if ($null -ne $choice) { $choice } else { [pscustomobject]@{ Table = ""; Key = "" } }
+                    & $showOperationFailure $choiceForError "Apply" $_.Exception.Message
+                }
+                finally { & $setBusy $false }
+            }.GetNewClosure())
+        }
+        else {
+            $check.Add_Click({ & $startAsyncOperation "Check" }.GetNewClosure())
+            $apply.Add_Click({ & $startAsyncOperation "Apply" }.GetNewClosure())
+        }
+        $close.Add_Click({ $form.Close() }.GetNewClosure())
+        $form.Add_FormClosing({
+            if ($null -ne $operationState -and $null -ne $operationState.Job) {
+                Stop-CpcvTrayTmuxRemoteJob -Job $operationState.Job
+                $operationState.Job = $null
+            }
+        }.GetNewClosure())
+        $form.Add_KeyDown({ if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $form.Close() } })
+
+        & $syncChoice
+        [void]$form.ShowDialog()
+        return [bool]$form.Tag
+    }
+    finally {
+        if ($operationTimer) { $operationTimer.Stop(); $operationTimer.Dispose() }
+        if ($operationState -and $operationState.Job) { Stop-CpcvTrayTmuxRemoteJob -Job $operationState.Job }
+        if ($form) { $form.Dispose() }
+    }
+}
+
 function Open-CpcvTrayDataFolder {
     $path = (Get-CpcvConfig).DataRoot
     if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
@@ -1166,6 +1866,14 @@ function Show-CpcvTrayStatusWindow {
     Set-CpcvTrayButtonStyle -Button $dataButton -Kind Quiet
     $actions.Controls.Add($dataButton)
 
+    $tmuxButton = New-Object System.Windows.Forms.Button
+    $tmuxButton.Name = "cpcvTrayTmuxButton"
+    $tmuxButton.Text = "Tmux path insertion..."
+    $tmuxButton.Size = New-Object System.Drawing.Size(182, 30)
+    $tmuxButton.Location = New-Object System.Drawing.Point(410, 119)
+    Set-CpcvTrayButtonStyle -Button $tmuxButton -Kind Quiet
+    $actions.Controls.Add($tmuxButton)
+
     $actionFeedback = New-Object System.Windows.Forms.Label
     $actionFeedback.AutoEllipsis = $true
     $actionFeedback.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
@@ -1189,6 +1897,7 @@ function Show-CpcvTrayStatusWindow {
     $tooltip.SetToolTip($uploadButton, "Run one safe, asynchronous upload of the current clipboard image.")
     $tooltip.SetToolTip($serviceButton, "Only processes started from this checkout can be changed.")
     $tooltip.SetToolTip($copyButton, "Copy the most recent validated remote path without displaying it here.")
+    $tooltip.SetToolTip($tmuxButton, "Configure the optional cpcv path-insertion binding on the remote tmux server.")
 
     $refreshDashboard = {
         param([Parameter(Mandatory)]$CurrentState)
@@ -1264,6 +1973,7 @@ function Show-CpcvTrayStatusWindow {
         }
         catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
+    $tmuxButton.Add_Click({ try { Show-CpcvTrayTmuxSetupWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
     $logButton.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
     $dataButton.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
 
@@ -1317,6 +2027,7 @@ function Start-CpcvTrayApplication {
         [void]$menu.Items.Add("-")
         $logItem = $menu.Items.Add("View recent activity...")
         $configItem = $menu.Items.Add("Settings...")
+        $tmuxItem = $menu.Items.Add("Configure tmux path insertion...")
         $dataItem = $menu.Items.Add("Open data folder")
         [void]$menu.Items.Add("-")
         $exitItem = $menu.Items.Add("Exit tray (service stays running)")
@@ -1363,6 +2074,7 @@ function Start-CpcvTrayApplication {
         $restartItem.Add_Click({ try { Restart-CpcvTrayService; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
         $logItem.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError $_.Exception.Message } })
         $configItem.Add_Click({ try { if (Show-CpcvTraySettingsWindow) { & $refreshUi } } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $tmuxItem.Add_Click({ try { Show-CpcvTrayTmuxSetupWindow } catch { Show-CpcvTrayError $_.Exception.Message } })
         $dataItem.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError $_.Exception.Message } })
         $notify.Add_DoubleClick({ & $refreshUi; Show-CpcvTrayStatusWindow -State $script:CpcvTrayState })
         $exitItem.Add_Click({ $context.ExitThread() })

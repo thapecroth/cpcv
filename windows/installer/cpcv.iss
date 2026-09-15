@@ -301,20 +301,20 @@ begin
     'Copy an image locally. cpcv will upload it to $HOME/' + RemoteDir + '/latest.png on ' + HostAlias + '.';
   if RemoteTmux = 'Not installed' then begin
     Result := Result + NewLine + NewLine +
-      'Automatic image uploads are ready. Install tmux later if you want pane-specific Ctrl-V paste.';
+      'Automatic image uploads are ready. Install tmux later if you want pane-specific path insertion.';
     if TmuxPlugin = 'Installed by Setup' then
       Result := Result + NewLine + 'The plugin files are already on the SSH computer and will be ready after tmux is installed.';
   end
   else if RemoteTmux = 'Installed' then begin
     if (TmuxPlugin = 'Installed by Setup') or (TmuxPlugin = 'Already installed') then begin
       Result := Result + NewLine + NewLine +
-        'To enable pane-specific Ctrl-V, add this line to the remote ~/.tmux.conf:' + NewLine +
+        'To enable pane-specific path insertion, add this line to the remote ~/.tmux.conf:' + NewLine +
         'run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux' + NewLine +
-        'Then reload tmux. Setup installs plugin files but never edits your tmux configuration.';
+        'Then reload tmux. Use Configure tmux path insertion in the cpcv tray to choose a shortcut; its default pairs Windows Alt-V with macOS Ctrl-V. Setup installs plugin files but never edits your tmux configuration.';
     end
     else begin
       Result := Result + NewLine + NewLine +
-        'tmux is available. Rerun Setup and select the optional tmux plugin if you want pane-specific Ctrl-V paste.';
+        'tmux is available. Rerun Setup and select the optional tmux plugin if you want pane-specific path insertion.';
     end;
   end
   else if (TmuxPlugin = 'Installed by Setup') or (TmuxPlugin = 'Already installed') then begin

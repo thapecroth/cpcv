@@ -34,6 +34,8 @@ foreach ($required in @(
     'CreateOutputMsgMemoPage',
     'Connection and tmux readiness',
     'SSH connection name:',
+    'Configure tmux path insertion',
+    'Windows Alt-V with macOS Ctrl-V',
     '-StatusFile',
     'WizardSilent',
     '-ExecutionPolicy RemoteSigned',
@@ -81,6 +83,7 @@ foreach ($required in @(
     'Resolve-CpcvInnoCompiler',
     'Expand-Archive',
     'Test-CpcvExecutableHeader',
+    'cpcv-windows/cpcv-remote.ps1',
     'show", "HEAD:VERSION',
     'CpcvOutputBaseName'
 )) {

@@ -100,6 +100,20 @@ as well as `CPCV_CONFIG` when it selects a non-default settings file. **View rec
 shows a bounded, redacted tail of the local activity log rather than opening the
 raw log or `config.psd1` in an editor.
 
+**Configure tmux path insertion…** is a separate, explicit action in the
+Windows tray and macOS menu-bar app for the optional remote integration. It is
+deliberately not part of **Settings…**: saving local upload settings must not
+imply a remote tmux change. The action opens on the cross-platform **Windows
+Alt-V + macOS Ctrl-V** preset, which binds both tmux `root` keys (`M-v` and
+`C-v`) on the shared server. This does not attempt to infer a client's
+operating system. The portable `prefix`, then `v` binding, a custom prefix key,
+and raw `Ctrl-V`-only remain available. The action installs or updates only
+cpcv-owned remote plugin and configuration files after the user chooses
+**Apply**. It does not edit `~/.tmux.conf`, shell startup files, or terminal
+keybindings. If a default tmux server is already running, the action reloads
+cpcv in that server; the user must still copy the displayed `run-shell` line
+into their own tmux configuration for the integration to survive a tmux restart.
+
 On macOS, the everyday menu contains a disabled status row, **Copy Last Image
 Path**, one contextual pause/resume action, **Check & Repair**, and **Settings**.
 Restart, recent activity, and internal status details are grouped under
@@ -151,10 +165,58 @@ block. It preserves uploaded images and the core cpcv configuration.
 `cpcv.tmux` inserts the configured remote `latest.png` path into the pane
 that triggered it, using a transient tmux buffer. It does not change an OS
 clipboard. Source the plugin's printed `run-shell` line in a user-owned tmux
-config. Its default capture key is `Ctrl-V`; if that key is already bound,
-cpcv leaves it unchanged, and `@cpcv-paste-key` can select an unused
-tmux key before sourcing the plugin. Warp consumes `Cmd-V` and cannot map it
-to a raw control key, so use `Ctrl-V` with Warp.
+config. Its no-configuration fallback is the tmux prefix followed by `v`
+(normally `Ctrl-B`, then `v`). Because that fallback is in tmux's `prefix`
+table, cpcv does not capture raw local paste keys such as `Cmd-V`, `Ctrl-V`,
+or `Ctrl-Shift-V`.
+
+This is deliberately not selected by the client operating system. A remote
+tmux server can be shared by macOS, Windows, and Linux terminal clients at
+once, and terminal identity is not a reliable OS signal. **Configure tmux path
+insertion…** therefore can save the paired `root`/`M-v` (Windows Alt-V) and
+`root`/`C-v` (macOS Ctrl-V) bindings together, alongside its portable,
+custom-prefix, and raw `Ctrl-V`-only alternatives. Applying the action updates
+only marked cpcv files and, when available, reloads the default running tmux
+server; it never edits the user-owned `~/.tmux.conf`. Copy the one displayed
+`run-shell` line into that file yourself to make the plugin load in future
+sessions.
+
+Explicit user-owned tmux options take precedence over the tray selection. If
+the default key is already bound, cpcv leaves it unchanged; set both
+`@cpcv-paste-table prefix` and `@cpcv-paste-key` to an unused key before
+sourcing the plugin. For example:
+
+```tmux
+set -g @cpcv-paste-table prefix
+set -g @cpcv-paste-key p
+run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
+```
+
+For upgrade compatibility, an existing configuration that sets only
+`@cpcv-paste-key` retains the former root-table behavior. Add
+`@cpcv-paste-table prefix` explicitly to move that configuration to the
+portable shortcut. Remove or change explicit `@cpcv-paste-*` options if you
+want the desktop action's saved selection to control the binding again. While
+an explicit option is active on the default server, the action reports that
+override and leaves remote cpcv files unchanged.
+
+Raw `Ctrl-V` is available only as an explicit opt-in, whether by itself or as
+the macOS half of the cross-platform preset:
+
+```tmux
+set -g @cpcv-paste-table root
+set -g @cpcv-paste-key C-v
+run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
+```
+
+Use that mode only when the terminal is configured to forward `Ctrl-V` to
+tmux; it intentionally replaces normal `Ctrl-V` handling in that tmux server.
+On Windows, Warp can consume bare `Ctrl-V` for its alternate terminal paste
+before SSH or tmux sees it, so no tmux escape sequence can recover it. The
+cross-platform preset binds `Alt-V` (`M-v`) for those Windows clients while
+leaving raw `Ctrl-V` for macOS clients that forward it. Both keys are global to
+the shared tmux server—not OS-detected or per-client—and both desktop apps make
+the same choice available without editing `~/.tmux.conf`.
 
 The plugin appends `cpcv · 2 sec ago` to tmux's right status area. This is
 the age of `latest.png` on the target server, calculated entirely on that

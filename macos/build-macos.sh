@@ -149,6 +149,7 @@ for required in \
   cpcv/RELEASE-METADATA.json \
   cpcv/macos/install-macos.sh \
   cpcv/macos/install-tray.sh \
+  cpcv/macos/deploy-remote-tmux-cpcv-plugin.sh \
   cpcv/macos/build/cpcv-macos \
   cpcv/macos/build/cpcv-tray; do
   /usr/bin/unzip -Z1 "$archive" | /usr/bin/grep -Fx -- "$required" >/dev/null || \

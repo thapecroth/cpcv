@@ -1,9 +1,9 @@
 // Native macOS menu-bar companion for cpcv.
 //
-// It is intentionally separate from the uploader.  The only integration
-// boundary is cpcv-macos-ctl.sh, which returns bounded JSON for `status`
-// and performs named local actions.  No status value is ever passed to a
-// shell: Process receives a fixed executable and an argument array.
+// It is intentionally separate from the uploader. Local uploader actions use
+// cpcv-macos-ctl.sh; remote tmux setup uses the project-owned helper with a
+// fixed action and validated argument array. No status value is ever passed to
+// a shell: Process receives a fixed executable and an argument array.
 
 import AppKit
 import Darwin
@@ -13,6 +13,11 @@ private let maximumControlOutput = 65_536
 private let controlTimeout: TimeInterval = 8
 private let doctorControlTimeout: TimeInterval = 3_300
 private let settingsControlTimeout: TimeInterval = 20
+// An apply performs several individually bounded SSH/SCP calls (preflight,
+// staging, install, optional reload, and verification), so its outer bound is
+// intentionally longer than a single controller action.
+private let tmuxSetupControlTimeout: TimeInterval = 120
+private let tmuxStartupLine = "run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux"
 
 struct CpcvStatus: Decodable {
     let version: String?
@@ -55,6 +60,78 @@ private struct SettingsForm: Decodable {
     var remoteDir: String
     var remoteHome: String
     var pollIntervalSeconds: Int
+}
+
+private enum TmuxBindingMode {
+    case crossPlatform
+    case recommended
+    case custom
+    case rawControlV
+}
+
+private struct TmuxBindingDraft {
+    let mode: TmuxBindingMode
+    let customKey: String
+}
+
+private struct TmuxBinding: Equatable {
+    let table: String
+    let key: String
+    let secondaryTable: String?
+    let secondaryKey: String?
+
+    var displayName: String {
+        if secondaryTable != nil && secondaryKey != nil {
+            return "macOS Ctrl-V and Windows Alt-V"
+        }
+        table == "root" ? "raw Ctrl-V" : "tmux prefix, then \(key)"
+    }
+}
+
+private enum TmuxBindingError: LocalizedError {
+    case invalidCustomKey
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidCustomKey:
+            return "Choose exactly one lowercase letter or digit for a custom prefix binding."
+        }
+    }
+}
+
+private func validatedTmuxBinding(_ draft: TmuxBindingDraft) throws -> TmuxBinding {
+    switch draft.mode {
+    case .crossPlatform:
+        // This pair is intentionally exact. On macOS, Ctrl-V normally reaches
+        // the terminal while Cmd-V remains ordinary paste. On Windows, Warp
+        // can consume Ctrl-V locally, so Alt-V arrives at tmux as M-v.
+        return TmuxBinding(table: "root", key: "C-v", secondaryTable: "root", secondaryKey: "M-v")
+    case .recommended:
+        return TmuxBinding(table: "prefix", key: "v", secondaryTable: nil, secondaryKey: nil)
+    case .rawControlV:
+        return TmuxBinding(table: "root", key: "C-v", secondaryTable: nil, secondaryKey: nil)
+    case .custom:
+        let key = draft.customKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key.range(of: "^[a-z0-9]$", options: .regularExpression) != nil else {
+            throw TmuxBindingError.invalidCustomKey
+        }
+        return TmuxBinding(table: "prefix", key: key, secondaryTable: nil, secondaryKey: nil)
+    }
+}
+
+private struct TmuxRemoteSetupResult: Decodable {
+    let ok: Bool
+    let action: String
+    let tmux: String
+    let plugin: String
+    let server: String
+    let binding: String
+    let secondaryBinding: String?
+    let override: String
+    let applied: Bool
+    let runtime: String
+    let detail: String
+    let startupLine: String?
 }
 
 struct ControlResult {
@@ -271,6 +348,89 @@ private func refreshInterval(state: String?, actionInFlight: Bool) -> TimeInterv
     actionInFlight || state?.lowercased() == "uploading" ? 1 : 4
 }
 
+private func tmuxSetupMessage(_ result: TmuxRemoteSetupResult) -> String {
+    let tmuxDescription: String
+    switch result.tmux {
+    case "installed": tmuxDescription = "tmux is installed on the remote host."
+    case "missing": tmuxDescription = "tmux is not installed on the remote host."
+    default: tmuxDescription = "The remote tmux availability is unknown."
+    }
+    let pluginDescription: String
+    switch result.plugin {
+    case "installed": pluginDescription = "The cpcv-owned plugin files are installed."
+    case "missing": pluginDescription = "The cpcv plugin files have not been installed yet."
+    case "unverified": pluginDescription = "A cpcv plugin path exists but is not safe for cpcv to replace."
+    default: pluginDescription = "The cpcv plugin file state is unknown."
+    }
+    let serverDescription: String
+    switch result.server {
+    case "running": serverDescription = "A default tmux server is running."
+    case "stopped": serverDescription = "No default tmux server is running; a saved setting will apply when one starts."
+    case "unavailable": serverDescription = "No tmux server can be checked until tmux is installed."
+    default: serverDescription = "The default tmux server state is unknown."
+    }
+    let bindingDescription: String
+    switch result.binding {
+    case "managed": bindingDescription = "The checked cpcv binding is owned by cpcv."
+    case "available": bindingDescription = "The selected binding is available for cpcv."
+    case "collision": bindingDescription = result.applied
+        ? "The active binding belongs to another command; cpcv files were saved but the binding needs attention."
+        : "The active binding belongs to another command; no files were changed."
+    case "pending": bindingDescription = "The binding will be checked when a tmux server is running."
+    case "invalid": bindingDescription = "The active tmux binding configuration is invalid."
+    case "unavailable": bindingDescription = "The binding cannot be checked without tmux."
+    default: bindingDescription = "The binding state is unknown."
+    }
+
+    var lines = [tmuxDescription, pluginDescription, serverDescription, bindingDescription]
+    switch result.secondaryBinding {
+    case nil, "none": break
+    case "managed": lines.append("The Windows Alt-V (tmux M-v) binding is owned by cpcv.")
+    case "available": lines.append("The Windows Alt-V (tmux M-v) binding is available for cpcv.")
+    case "collision": lines.append("The Windows Alt-V (tmux M-v) binding belongs to another command.")
+    case "pending": lines.append("The Windows Alt-V (tmux M-v) binding will be checked when a tmux server is running.")
+    case "invalid": lines.append("The Windows Alt-V (tmux M-v) binding configuration is invalid.")
+    case "unavailable": lines.append("The Windows Alt-V (tmux M-v) binding cannot be checked without tmux.")
+    default: lines.append("The Windows Alt-V (tmux M-v) binding state is unknown.")
+    }
+    if result.action == "status" {
+        let scope = (result.override == "explicit" || result.override == "invalid")
+            ? "This checks an explicit user-owned cpcv tmux setting; the selection above cannot take effect until that setting is managed."
+            : "This checks the selection shown above; it does not infer a previously saved cpcv binding from tmux-paste.conf."
+        lines.insert(scope, at: 0)
+    }
+    if result.override == "explicit" {
+        lines.append("Your explicit @cpcv-paste-table or @cpcv-paste-key tmux option takes priority over this UI selection.")
+        if result.detail == "user-override", !result.applied {
+            lines.append("No cpcv remote files were changed. Manage or remove that user-owned tmux setting yourself before applying a UI selection.")
+        } else if result.detail == "user-override" {
+            lines.append("The cpcv remote files were saved, but manage or remove that user-owned tmux setting before applying the binding again.")
+        } else if result.action == "apply" {
+            lines.append("The UI selection was saved in cpcv's remote configuration, but it is not the active binding while that explicit option exists.")
+        } else {
+            lines.append("Manage or remove that user-owned tmux setting yourself before applying a UI selection.")
+        }
+    } else if result.override == "invalid" {
+        if result.detail == "user-override", !result.applied {
+            lines.append("No cpcv remote files were changed. An explicit cpcv tmux option is invalid and must be fixed in your user-owned tmux configuration.")
+        } else if result.detail == "user-override" {
+            lines.append("The cpcv remote files were saved, but an explicit cpcv tmux option is invalid and must be fixed in your user-owned tmux configuration.")
+        } else {
+            lines.append("An explicit cpcv tmux option is invalid and must be fixed in your user-owned tmux configuration.")
+        }
+    }
+    if result.action == "apply" {
+        switch result.runtime {
+        case "reloaded": lines.append("The running default tmux server was reloaded now.")
+        case "saved-next-server": lines.append("The configuration was saved for the next tmux server.")
+        case "saved-reload-needed": lines.append("The configuration was saved, but the running tmux server was not reloaded.")
+        case "reload-failed": lines.append("The configuration was saved, but its active binding still needs attention.")
+        default: lines.append(result.ok ? "The remote configuration was saved." : "The remote configuration was not applied.")
+        }
+    }
+    return lines.joined(separator: "\n\n")
+}
+
 private func runTraySelfTest() -> Int32 {
     let fixture = """
     Authorization: Bearer authorization-secret
@@ -333,6 +493,43 @@ private func runTraySelfTest() -> Int32 {
           (try? validatedSettingsForm(hostAlias: "host", remoteDir: "images", remoteHome: "/tmp/../unsafe", pollIntervalText: "2")) == nil,
           (try? validatedSettingsForm(hostAlias: "host", remoteDir: "images", remoteHome: "", pollIntervalText: "61")) == nil else {
         fputs("tray self-test settings validation failed\n", stderr)
+        return 1
+    }
+    guard let crossPlatformBinding = try? validatedTmuxBinding(TmuxBindingDraft(mode: .crossPlatform, customKey: "")),
+          let recommendedBinding = try? validatedTmuxBinding(TmuxBindingDraft(mode: .recommended, customKey: "")),
+          let customBinding = try? validatedTmuxBinding(TmuxBindingDraft(mode: .custom, customKey: "7")),
+          let rawBinding = try? validatedTmuxBinding(TmuxBindingDraft(mode: .rawControlV, customKey: "")),
+          crossPlatformBinding.table == "root", crossPlatformBinding.key == "C-v",
+          crossPlatformBinding.secondaryTable == "root", crossPlatformBinding.secondaryKey == "M-v",
+          recommendedBinding.table == "prefix", recommendedBinding.key == "v",
+          customBinding.table == "prefix", customBinding.key == "7",
+          rawBinding.table == "root", rawBinding.key == "C-v",
+          (try? validatedTmuxBinding(TmuxBindingDraft(mode: .custom, customKey: "C-v"))) == nil else {
+        fputs("tray self-test tmux binding validation failed\n", stderr)
+        return 1
+    }
+    let tmuxResult = TmuxRemoteSetupResult(ok: true, action: "apply", tmux: "installed", plugin: "installed",
+                                            server: "running", binding: "managed", secondaryBinding: "none", override: "none", applied: true,
+                                            runtime: "reloaded", detail: "reloaded", startupLine: tmuxStartupLine)
+    let tmuxOverride = TmuxRemoteSetupResult(ok: true, action: "status", tmux: "installed", plugin: "installed",
+                                              server: "running", binding: "managed", secondaryBinding: "none", override: "explicit", applied: false,
+                                              runtime: "checked", detail: "checked", startupLine: tmuxStartupLine)
+    let tmuxBlocked = TmuxRemoteSetupResult(ok: false, action: "apply", tmux: "installed", plugin: "installed",
+                                             server: "running", binding: "managed", secondaryBinding: "none", override: "explicit", applied: false,
+                                             runtime: "not-applied", detail: "user-override", startupLine: tmuxStartupLine)
+    let tmuxSaved = TmuxRemoteSetupResult(ok: true, action: "apply", tmux: "installed", plugin: "installed",
+                                           server: "stopped", binding: "pending", secondaryBinding: "pending", override: "none", applied: true,
+                                           runtime: "saved-next-server", detail: "saved-next-server", startupLine: tmuxStartupLine)
+    let tmuxDual = TmuxRemoteSetupResult(ok: true, action: "apply", tmux: "installed", plugin: "installed",
+                                          server: "running", binding: "managed", secondaryBinding: "managed", override: "none", applied: true,
+                                          runtime: "reloaded", detail: "reloaded", startupLine: tmuxStartupLine)
+    guard tmuxSetupMessage(tmuxResult).contains("reloaded now"),
+          tmuxSetupMessage(tmuxOverride).contains("takes priority"),
+          tmuxSetupMessage(tmuxBlocked).contains("No cpcv remote files were changed"),
+          tmuxSetupMessage(tmuxSaved).contains("next tmux server"),
+          tmuxSetupMessage(tmuxDual).contains("Windows Alt-V"),
+          tmuxStartupLine == "run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux" else {
+        fputs("tray self-test tmux setup presentation failed\n", stderr)
         return 1
     }
     print("PASS: macOS tray redaction self-test")
@@ -493,9 +690,127 @@ private final class SettingsFormView: NSView {
     }
 }
 
+private final class TmuxSetupFormView: NSView {
+    private let crossPlatformButton = NSButton(radioButtonWithTitle: "Cross-platform — Ctrl-V on macOS, Alt-V on Windows", target: nil, action: nil)
+    private let recommendedButton = NSButton(radioButtonWithTitle: "Portable — tmux prefix, then v", target: nil, action: nil)
+    private let customButton = NSButton(radioButtonWithTitle: "Custom — tmux prefix, then", target: nil, action: nil)
+    private let rawButton = NSButton(radioButtonWithTitle: "Advanced — raw Ctrl-V only", target: nil, action: nil)
+    private let customKeyField = NSTextField()
+    private let copyStartupButton = NSButton(title: "Copy Startup Line", target: nil, action: nil)
+    private let rawWarning = NSTextField(wrappingLabelWithString: "Raw Ctrl-V replaces ordinary terminal paste in the remote tmux server. The cross-platform preset also binds Windows Alt-V (tmux M-v), because Warp can capture Ctrl-V locally before tmux sees it.")
+
+    init(draft: TmuxBindingDraft, status: String?) {
+        super.init(frame: NSRect(x: 0, y: 0, width: 540, height: status == nil ? 330 : 590))
+        crossPlatformButton.target = self
+        crossPlatformButton.action = #selector(changeMode(_:))
+        recommendedButton.target = self
+        recommendedButton.action = #selector(changeMode(_:))
+        customButton.target = self
+        customButton.action = #selector(changeMode(_:))
+        rawButton.target = self
+        rawButton.action = #selector(changeMode(_:))
+        crossPlatformButton.setAccessibilityLabel("Cross-platform macOS Control V and Windows Alt V binding")
+        recommendedButton.setAccessibilityLabel("Portable tmux prefix then v binding")
+        customButton.setAccessibilityLabel("Custom tmux prefix binding")
+        rawButton.setAccessibilityLabel("Advanced raw Control V binding")
+
+        customKeyField.stringValue = draft.customKey
+        customKeyField.placeholderString = "key"
+        customKeyField.alignment = .center
+        customKeyField.maximumNumberOfLines = 1
+        customKeyField.setAccessibilityLabel("Custom tmux prefix key")
+        customKeyField.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        copyStartupButton.target = self
+        copyStartupButton.action = #selector(copyStartupLine)
+        copyStartupButton.setAccessibilityLabel("Copy remote tmux startup line")
+
+        switch draft.mode {
+        case .crossPlatform: crossPlatformButton.state = .on
+        case .recommended: recommendedButton.state = .on
+        case .custom: customButton.state = .on
+        case .rawControlV: rawButton.state = .on
+        }
+
+        rawWarning.textColor = .systemOrange
+        rawWarning.maximumNumberOfLines = 3
+        rawWarning.preferredMaxLayoutWidth = 520
+        rawWarning.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+
+        let introduction = NSTextField(wrappingLabelWithString: "Choose the remote tmux path-insertion shortcut. This is separate from uploader Settings: saving changes only cpcv-owned remote plugin files and never edits ~/.tmux.conf.")
+        introduction.textColor = .secondaryLabelColor
+        introduction.maximumNumberOfLines = 3
+        introduction.preferredMaxLayoutWidth = 520
+
+        let customRow = NSStackView(views: [customButton, customKeyField])
+        customRow.orientation = .horizontal
+        customRow.alignment = .centerY
+        customRow.spacing = 8
+
+        var views: [NSView] = [introduction, crossPlatformButton, recommendedButton, customRow, rawButton, rawWarning]
+        if let status, !status.isEmpty {
+            let statusLabel = NSTextField(wrappingLabelWithString: status)
+            statusLabel.textColor = .secondaryLabelColor
+            statusLabel.maximumNumberOfLines = 12
+            statusLabel.preferredMaxLayoutWidth = 520
+            views.append(NSBox.separator())
+            views.append(statusLabel)
+        }
+        let startupLabel = NSTextField(wrappingLabelWithString: "Startup line (copy this into your own remote tmux config):\n\(tmuxStartupLine)")
+        startupLabel.font = NSFont.monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        startupLabel.maximumNumberOfLines = 2
+        startupLabel.preferredMaxLayoutWidth = 520
+        views.append(startupLabel)
+        views.append(copyStartupButton)
+
+        let content = NSStackView(views: views)
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 10
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        updateMode()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func draft() -> TmuxBindingDraft {
+        if crossPlatformButton.state == .on { return TmuxBindingDraft(mode: .crossPlatform, customKey: customKeyField.stringValue) }
+        if customButton.state == .on { return TmuxBindingDraft(mode: .custom, customKey: customKeyField.stringValue) }
+        if rawButton.state == .on { return TmuxBindingDraft(mode: .rawControlV, customKey: customKeyField.stringValue) }
+        return TmuxBindingDraft(mode: .recommended, customKey: customKeyField.stringValue)
+    }
+
+    @objc private func changeMode(_ sender: NSButton) {
+        crossPlatformButton.state = sender === crossPlatformButton ? .on : .off
+        recommendedButton.state = sender === recommendedButton ? .on : .off
+        customButton.state = sender === customButton ? .on : .off
+        rawButton.state = sender === rawButton ? .on : .off
+        updateMode()
+    }
+
+    private func updateMode() {
+        customKeyField.isEnabled = customButton.state == .on
+        rawWarning.isHidden = rawButton.state != .on && crossPlatformButton.state != .on
+    }
+
+    @objc private func copyStartupLine() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(tmuxStartupLine, forType: .string)
+        copyStartupButton.title = "Startup Line Copied"
+        copyStartupButton.isEnabled = false
+    }
+}
+
 @main
 final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var controlPath = ""
+    private var tmuxHelperPath = ""
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
     private var statusMenuItem: NSMenuItem!
@@ -503,6 +818,7 @@ final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pauseMenuItem: NSMenuItem!
     private var doctorMenuItem: NSMenuItem!
     private var settingsMenuItem: NSMenuItem!
+    private var tmuxSetupMenuItem: NSMenuItem!
     private var restartMenuItem: NSMenuItem!
     private var openLogMenuItem: NSMenuItem!
     private var statusDetailsMenuItem: NSMenuItem!
@@ -513,6 +829,7 @@ final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var doctorInFlight = false
     private var serviceActionInFlight = false
     private var settingsInFlight = false
+    private var tmuxSetupInFlight = false
     private var activityIndicator: NSProgressIndicator?
 
     static func main() {
@@ -534,6 +851,7 @@ final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let root = arguments[rootIndex + 1]
         controlPath = URL(fileURLWithPath: root).appendingPathComponent("macos/cpcv-macos-ctl.sh").path
+        tmuxHelperPath = URL(fileURLWithPath: root).appendingPathComponent("macos/deploy-remote-tmux-cpcv-plugin.sh").path
         guard FileManager.default.isExecutableFile(atPath: controlPath) else {
             showFatalConfiguration("Cannot find an executable macOS controller at \(controlPath). Install the macOS uploader first.")
             return
@@ -590,6 +908,12 @@ final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsMenuItem.target = self
         settingsMenuItem.image = menuImage("gearshape", description: "Settings")
         menu.addItem(settingsMenuItem)
+
+        tmuxSetupMenuItem = NSMenuItem(title: "Configure tmux path insertion…", action: #selector(openTmuxSetup), keyEquivalent: "")
+        tmuxSetupMenuItem.target = self
+        tmuxSetupMenuItem.image = menuImage("keyboard", description: "Tmux path insertion")
+        tmuxSetupMenuItem.isEnabled = FileManager.default.isExecutableFile(atPath: tmuxHelperPath)
+        menu.addItem(tmuxSetupMenuItem)
 
         let troubleshootingItem = NSMenuItem(title: "Troubleshooting", action: nil, keyEquivalent: "")
         troubleshootingItem.image = menuImage("ellipsis.circle", description: "Troubleshooting")
@@ -677,6 +1001,7 @@ final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
         doctorMenuItem.title = presentation.doctorTitle
         doctorMenuItem.isEnabled = (status == nil || supports("doctor")) && !busy
         settingsMenuItem.isEnabled = (status == nil || supports("settings-read")) && !busy
+        tmuxSetupMenuItem.isEnabled = FileManager.default.isExecutableFile(atPath: tmuxHelperPath) && !tmuxSetupInFlight
         restartMenuItem.isEnabled = supports("restart") && !busy
         openLogMenuItem.isEnabled = supports("logs")
         statusDetailsMenuItem.isEnabled = status != nil
@@ -959,6 +1284,110 @@ final class CpcvTray: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.refreshStatus()
             }
         }
+    }
+
+    @objc private func openTmuxSetup() {
+        guard !tmuxSetupInFlight else { return }
+        guard FileManager.default.isExecutableFile(atPath: tmuxHelperPath) else {
+            showAlert(title: "Tmux setup is unavailable", message: "The cpcv remote tmux helper is missing. Reinstall or update this cpcv checkout.", style: .warning)
+            return
+        }
+        presentTmuxSetup(draft: TmuxBindingDraft(mode: .crossPlatform, customKey: "v"), status: nil)
+    }
+
+    private func presentTmuxSetup(draft: TmuxBindingDraft, status: String?) {
+        guard !tmuxSetupInFlight else { return }
+        let form = TmuxSetupFormView(draft: draft, status: status)
+        let alert = NSAlert()
+        alert.messageText = "cpcv tmux path insertion"
+        alert.informativeText = "Check the remote setup first, then explicitly install and apply your selected binding."
+        alert.alertStyle = .informational
+        alert.accessoryView = form
+        alert.addButton(withTitle: "Check Remote Setup")
+        alert.addButton(withTitle: "Install / Apply")
+        alert.addButton(withTitle: "Close")
+        let response = alert.runModal()
+        let nextDraft = form.draft()
+        if response == .alertFirstButtonReturn {
+            beginTmuxSetup(action: "status", draft: nextDraft)
+        } else if response == .alertSecondButtonReturn {
+            beginTmuxSetup(action: "apply", draft: nextDraft)
+        }
+    }
+
+    private func beginTmuxSetup(action: String, draft: TmuxBindingDraft) {
+        let binding: TmuxBinding
+        do {
+            binding = try validatedTmuxBinding(draft)
+        } catch {
+            showAlert(title: "Check the tmux binding", message: error.localizedDescription, style: .warning)
+            presentTmuxSetup(draft: draft, status: nil)
+            return
+        }
+        guard !controlPath.isEmpty, FileManager.default.isExecutableFile(atPath: tmuxHelperPath) else {
+            showAlert(title: "Tmux setup is unavailable", message: "The local cpcv control or remote tmux helper is unavailable.", style: .warning)
+            return
+        }
+
+        tmuxSetupInFlight = true
+        tmuxSetupMenuItem.isEnabled = false
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let settingsResult = runControl(controlPath: self.controlPath, arguments: ["settings-read"], timeout: settingsControlTimeout)
+            let settings: SettingsForm?
+            if !settingsResult.timedOut, settingsResult.exitCode == 0, let data = settingsResult.stdout.data(using: .utf8) {
+                settings = try? JSONDecoder().decode(SettingsForm.self, from: data)
+            } else {
+                settings = nil
+            }
+            guard let settings else {
+                let detail = settingsResult.timedOut
+                    ? "Reading the local SSH settings timed out."
+                    : redactForDisplay(settingsResult.stderr.isEmpty ? settingsResult.stdout : settingsResult.stderr, limit: 400)
+                DispatchQueue.main.async { [weak self] in
+                    self?.finishTmuxSetupFailure(draft: draft, title: "Unable to read remote settings",
+                                                 message: detail.isEmpty ? "The remote tmux setup needs valid local SSH settings." : detail)
+                }
+                return
+            }
+
+            var arguments = ["--host", settings.hostAlias, "--remote-dir", settings.remoteDir,
+                             "--paste-table", binding.table, "--paste-key", binding.key,
+                             "--action", action, "--format", "json"]
+            if let secondaryTable = binding.secondaryTable, let secondaryKey = binding.secondaryKey {
+                arguments.append(contentsOf: ["--paste-secondary-table", secondaryTable,
+                                               "--paste-secondary-key", secondaryKey])
+            }
+            if action == "apply" { arguments.append("--reload-default-server") }
+            let result = runControl(controlPath: self.tmuxHelperPath, arguments: arguments, timeout: tmuxSetupControlTimeout)
+            let setup: TmuxRemoteSetupResult?
+            if let data = result.stdout.data(using: .utf8) {
+                setup = try? JSONDecoder().decode(TmuxRemoteSetupResult.self, from: data)
+            } else {
+                setup = nil
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                guard let setup, setup.action == action else {
+                    let detail = result.timedOut
+                        ? "The remote tmux operation timed out. No successful result was confirmed."
+                        : redactForDisplay(result.stderr.isEmpty ? result.stdout : result.stderr, limit: 500)
+                    self.finishTmuxSetupFailure(draft: draft, title: "Remote tmux setup failed",
+                                                message: detail.isEmpty ? "No valid setup result was returned." : detail)
+                    return
+                }
+                self.tmuxSetupInFlight = false
+                self.tmuxSetupMenuItem.isEnabled = FileManager.default.isExecutableFile(atPath: self.tmuxHelperPath)
+                self.presentTmuxSetup(draft: draft, status: tmuxSetupMessage(setup))
+            }
+        }
+    }
+
+    private func finishTmuxSetupFailure(draft: TmuxBindingDraft, title: String, message: String) {
+        tmuxSetupInFlight = false
+        tmuxSetupMenuItem.isEnabled = FileManager.default.isExecutableFile(atPath: tmuxHelperPath)
+        showAlert(title: title, message: message, style: .warning)
+        presentTmuxSetup(draft: draft, status: nil)
     }
 
     @objc private func quit() { NSApplication.shared.terminate(nil) }

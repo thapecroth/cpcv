@@ -88,6 +88,7 @@ jobs:
         run: |
           .\tests\test-process-timeout.ps1
           .\tests\test-windows-e2e.ps1
+          .\tests\test-remote-tmux.ps1
           .\tests\test-tray.ps1
           .\tests\test-installer-ownership.ps1
           .\tests\test-windows-installer-package.ps1

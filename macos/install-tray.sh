@@ -64,6 +64,7 @@ job_loaded() {
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 launcher="$script_dir/cpcv-tray.sh"
 controller="$script_dir/cpcv-macos-ctl.sh"
+tmux_helper="$script_dir/deploy-remote-tmux-cpcv-plugin.sh"
 template="$script_dir/io.cpcv.tray.plist.template"
 source_file="$script_dir/cpcv-tray.swift"
 build_dir="$script_dir/build"
@@ -79,6 +80,7 @@ plist="$launch_agents/$label.plist"
 
 [[ -x "$launcher" && ! -L "$launcher" ]] || { printf '%s\n' "Missing safe executable launcher: $launcher" >&2; exit 1; }
 [[ -x "$controller" && ! -L "$controller" ]] || { printf '%s\n' "Missing safe executable macOS controller: $controller. Install the macOS uploader first." >&2; exit 1; }
+[[ -x "$tmux_helper" && ! -L "$tmux_helper" ]] || { printf '%s\n' "Missing safe remote tmux helper: $tmux_helper. Update this cpcv checkout." >&2; exit 1; }
 [[ -f "$template" ]] || { printf '%s\n' "Missing template: $template" >&2; exit 1; }
 if (( ! use_prebuilt )); then
   [[ -f "$source_file" && ! -L "$source_file" ]] || { printf '%s\n' "Missing tray source: $source_file" >&2; exit 1; }

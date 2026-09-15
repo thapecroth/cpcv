@@ -25,10 +25,12 @@ esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
 source_file="$script_dir/cpcv-macos.swift"
 tray_source="$script_dir/cpcv-tray.swift"
+tmux_helper="$script_dir/deploy-remote-tmux-cpcv-plugin.sh"
 version_file="$script_dir/../VERSION"
 
 [[ -f "$source_file" && ! -L "$source_file" ]] || die "Missing native source: $source_file"
 [[ -f "$tray_source" && ! -L "$tray_source" ]] || die "Missing tray source: $tray_source"
+[[ -f "$tmux_helper" && ! -L "$tmux_helper" ]] || die "Missing remote tmux helper: $tmux_helper"
 [[ -f "$version_file" && ! -L "$version_file" ]] || die 'Missing VERSION file.'
 release_version=$(tr -d '\r\n' < "$version_file")
 [[ "$release_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
@@ -97,6 +99,43 @@ done
   die 'Tray does not expose the compact Doctor action.'
 /usr/bin/grep -Fq 'SettingsFormView' "$tray_source" || \
   die 'Tray does not expose the native settings form.'
+/usr/bin/grep -Fq 'TmuxSetupFormView' "$tray_source" || \
+  die 'Tray does not expose the separate tmux path-insertion form.'
+/usr/bin/grep -Fq 'Configure tmux path insertion…' "$tray_source" || \
+  die 'Tray does not expose the tmux path-insertion menu item.'
+/usr/bin/grep -Fq 'Cross-platform — Ctrl-V on macOS, Alt-V on Windows' "$tray_source" || \
+  die 'Tray does not expose the cross-platform Ctrl-V/Alt-V preset.'
+/usr/bin/grep -Fq 'secondaryTable: "root", secondaryKey: "M-v"' "$tray_source" || \
+  die 'Tray does not map the cross-platform preset to tmux root/C-v and root/M-v.'
+/usr/bin/grep -Fq 'if action == "apply" { arguments.append("--reload-default-server") }' "$tray_source" || \
+  die 'Tray no longer reloads a running tmux server after explicit Install / Apply.'
+/usr/bin/grep -Fq 'tmuxStartupLine = "run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux"' "$tray_source" || \
+  die 'Tray does not display the user-owned tmux startup line.'
+/usr/bin/grep -Fq 'never edits ~/.tmux.conf' "$tray_source" || \
+  die 'Tray does not state the tmux configuration ownership boundary.'
+/usr/bin/grep -Fq -- '--paste-table prefix|root' "$tmux_helper" && \
+  /usr/bin/grep -Fq -- '--paste-key KEY' "$tmux_helper" && \
+  /usr/bin/grep -Fq -- '--paste-secondary-table root' "$tmux_helper" && \
+  /usr/bin/grep -Fq -- '--paste-secondary-key M-v' "$tmux_helper" && \
+  /usr/bin/grep -Fq -- '--reload-default-server' "$tmux_helper" || \
+  die 'Remote tmux helper does not expose strict binding and reload arguments.'
+/usr/bin/grep -Fq 'never reads, sources, or' "$tmux_helper" && \
+  /usr/bin/grep -Fq 'changes ~/.tmux.conf' "$tmux_helper" || \
+  die 'Remote tmux helper does not preserve the tmux.conf ownership boundary.'
+/usr/bin/grep -Fq 'emit_result false false not-applied user-override' "$tmux_helper" || \
+  die 'Remote tmux helper can install a selection hidden by an explicit user override.'
+if /bin/bash "$tmux_helper" --host 'host!unsafe' --action status >/dev/null 2>&1; then
+  die 'Remote tmux helper accepted an unsafe SSH target.'
+fi
+if /bin/bash "$tmux_helper" --host host --paste-table root --paste-key v --action status >/dev/null 2>&1; then
+  die 'Remote tmux helper accepted an unsafe raw root binding.'
+fi
+if /bin/bash "$tmux_helper" --host host --paste-table root --paste-key C-v --paste-secondary-table root --paste-secondary-key v --action status >/dev/null 2>&1; then
+  die 'Remote tmux helper accepted an invalid Windows Alt-V secondary binding.'
+fi
+if /bin/bash "$tmux_helper" --host host --paste-table root --paste-key C-v --paste-secondary-table root --action status >/dev/null 2>&1; then
+  die 'Remote tmux helper accepted a partial secondary binding.'
+fi
 /usr/bin/grep -Fq 'getppid() == guardianPID' "$script_dir/cpcv-macos.swift" || \
   die 'Watcher does not exit when its guardian exits.'
 /usr/bin/grep -Fq '/bin/sleep 1' "$script_dir/install-macos.sh" || \
@@ -104,6 +143,8 @@ done
 /usr/bin/grep -Fq 'bootstrapped=0' "$script_dir/install-tray.sh" && \
   /usr/bin/grep -Fq 'launchctl kickstart -k "$domain/$label"' "$script_dir/install-tray.sh" || \
   die 'Tray installer does not retry and confirm its LaunchAgent startup.'
+/usr/bin/grep -Fq 'tmux_helper="$script_dir/deploy-remote-tmux-cpcv-plugin.sh"' "$script_dir/install-tray.sh" || \
+  die 'Tray installer does not require the remote tmux helper.'
 for plist_template in "$script_dir/io.cpcv.guardian.plist.template" "$script_dir/io.cpcv.tray.plist.template"; do
   /usr/bin/plutil -lint "$plist_template" >/dev/null || die "Invalid LaunchAgent plist: $plist_template"
   template_path=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PATH' "$plist_template" 2>/dev/null || true)
@@ -116,6 +157,100 @@ command -v swiftc >/dev/null 2>&1 || \
 temporary_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/cpcv-macos-test.XXXXXX")
 trap '/bin/rm -rf -- "$temporary_directory"' EXIT
 test_binary="$temporary_directory/cpcv-macos"
+fake_tmux_bin="$temporary_directory/fake-tmux-bin"
+fake_tmux_state="$temporary_directory/fake-tmux-state"
+fake_tmux_count="$temporary_directory/fake-tmux-count"
+fake_scp_marker="$temporary_directory/fake-scp-called"
+fake_install_arguments="$temporary_directory/fake-tmux-install-arguments"
+/bin/mkdir -p -- "$fake_tmux_bin"
+cat > "$fake_tmux_bin/ssh" <<'FAKE_SSH'
+#!/usr/bin/env bash
+set -euo pipefail
+arguments="$*"
+if [[ "$arguments" == *'mktemp -d'* ]]; then
+  printf '%s\n' /tmp/cpcv-tmux.ABCD1234
+elif [[ "$arguments" == *'CPCV_STAGE_DIR='* ]]; then
+  [[ -z "${CPCV_FAKE_INSTALL_ARGUMENTS:-}" ]] || printf '%s\n' "$arguments" > "$CPCV_FAKE_INSTALL_ARGUMENTS"
+  exit 0
+elif [[ "$arguments" == *'find '* ]]; then
+  exit 0
+elif [[ "$arguments" == *'/bin/bash -s -- prefix v'* ]]; then
+  case "$(< "$CPCV_FAKE_TMUX_STATE")" in
+    managed) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\tnone\n' ;;
+    override) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\texplicit\n' ;;
+    stopped) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\tstopped\tpending\tnone\tnone\n' ;;
+    race)
+      count=0
+      [[ -f "$CPCV_FAKE_TMUX_COUNT" ]] && count=$(< "$CPCV_FAKE_TMUX_COUNT")
+      if [[ "$count" == 0 ]]; then
+        printf '%s' 1 > "$CPCV_FAKE_TMUX_COUNT"
+        printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\tnone\n'
+      else
+        printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tcollision\tnone\tnone\n'
+      fi
+      ;;
+    *) exit 2 ;;
+  esac
+elif [[ "$arguments" == *'/bin/bash -s -- root C-v root M-v'* ]]; then
+  case "$(< "$CPCV_FAKE_TMUX_STATE")" in
+    managed) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tmanaged\tnone\n' ;;
+    stopped) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\tstopped\tpending\tpending\tnone\n' ;;
+    *) exit 2 ;;
+  esac
+elif [[ "$arguments" == *'/bin/bash -s'* ]]; then
+  printf 'CPCV_TMUX_RELOAD\treloaded\n'
+fi
+FAKE_SSH
+cat > "$fake_tmux_bin/scp" <<'FAKE_SCP'
+#!/usr/bin/env bash
+set -euo pipefail
+: > "$CPCV_FAKE_SCP_MARKER"
+FAKE_SCP
+/bin/chmod 700 "$fake_tmux_bin/ssh" "$fake_tmux_bin/scp"
+printf '%s' managed > "$fake_tmux_state"
+CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" CPCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
+  /bin/bash "$tmux_helper" --host fake-host --action status --format json > "$temporary_directory/tmux-status.json"
+/usr/bin/grep -Fq '"action":"status"' "$temporary_directory/tmux-status.json" && \
+  /usr/bin/grep -Fq '"binding":"managed"' "$temporary_directory/tmux-status.json" || \
+  die 'Remote tmux helper status did not return bounded JSON.'
+[[ ! -e "$fake_scp_marker" ]] || die 'Remote tmux status unexpectedly staged or copied plugin files.'
+CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" CPCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
+  /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-apply.json"
+/usr/bin/grep -Fq '"runtime":"reloaded"' "$temporary_directory/tmux-apply.json" && \
+  [[ -f "$fake_scp_marker" ]] || die 'Remote tmux apply did not stage and report a reloaded server.'
+/bin/rm -f -- "$fake_scp_marker" "$fake_install_arguments"
+printf '%s' managed > "$fake_tmux_state"
+CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" CPCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
+  /bin/bash "$tmux_helper" --host fake-host --paste-table root --paste-key C-v --paste-secondary-table root --paste-secondary-key M-v --action apply --format json > "$temporary_directory/tmux-dual.json"
+/usr/bin/grep -Fq '"secondaryBinding":"managed"' "$temporary_directory/tmux-dual.json" && \
+  /usr/bin/grep -Fq -- '--paste-secondary-table' "$fake_install_arguments" && \
+  /usr/bin/grep -Fq -- 'M-v' "$fake_install_arguments" && \
+  [[ -f "$fake_scp_marker" ]] || die 'Remote tmux helper did not save the cross-platform dual binding.'
+/bin/rm -f -- "$fake_scp_marker" "$fake_install_arguments"
+printf '%s' override > "$fake_tmux_state"
+if CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
+  /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-override.json" 2>&1; then
+  die 'Remote tmux helper installed despite an explicit user-owned override.'
+fi
+/usr/bin/grep -Fq '"detail":"user-override"' "$temporary_directory/tmux-override.json" || \
+  die 'Remote tmux helper did not report the explicit user-owned override.'
+[[ ! -e "$fake_scp_marker" ]] || die 'Remote tmux helper staged files despite an explicit user-owned override.'
+/bin/rm -f -- "$fake_tmux_count" "$fake_scp_marker" "$fake_install_arguments"
+printf '%s' race > "$fake_tmux_state"
+if CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
+  /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-race.json" 2>&1; then
+  die 'Remote tmux helper did not report a post-install binding collision.'
+fi
+/usr/bin/grep -Fq '"detail":"binding-collision"' "$temporary_directory/tmux-race.json" && \
+  /usr/bin/grep -Fq '"applied":true' "$temporary_directory/tmux-race.json" && \
+  [[ -f "$fake_scp_marker" ]] || die 'Remote tmux helper did not distinguish a post-install binding collision.'
+/bin/rm -f -- "$fake_scp_marker"
+printf '%s' stopped > "$fake_tmux_state"
+CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
+  /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-stopped.json"
+/usr/bin/grep -Fq '"runtime":"saved-next-server"' "$temporary_directory/tmux-stopped.json" && \
+  /usr/bin/grep -Fq '"applied":true' "$temporary_directory/tmux-stopped.json" && \
+  [[ -f "$fake_scp_marker" ]] || die 'Remote tmux helper did not distinguish a saved binding from an active server reload.'
 swiftc -O -framework AppKit "$source_file" -o "$test_binary"
 swiftc -O -parse-as-library -framework AppKit "$tray_source" -o "$temporary_directory/cpcv-tray"
 

@@ -21,13 +21,63 @@ Assert-CpcvTray (-not ($traySource -match '(?i)\bnotepad\.exe\b')) "Tray actions
 Assert-CpcvTray (-not ($traySource -match '\bOpen-CpcvTray(?:Log|Config)\b')) "Legacy raw configuration or log opening actions are still reachable from the tray."
 Assert-CpcvTray ($traySource.Contains('function Show-CpcvTraySettingsWindow')) "Tray no longer provides the customer-facing Settings window."
 Assert-CpcvTray ($traySource.Contains('cpcvTraySettingsSaveButton') -and $traySource.Contains('Save-CpcvConfig -Config $draft')) "Settings window no longer saves through the validated configuration helper."
+Assert-CpcvTray ($traySource.Contains('. (Join-Path $PSScriptRoot "cpcv-remote.ps1")')) "Tray no longer loads the scoped remote tmux helper."
+Assert-CpcvTray ($traySource.Contains('function Show-CpcvTrayTmuxSetupWindow') -and $traySource.Contains('cpcvTrayTmuxApplyButton')) "Tray no longer provides the explicit tmux path-insertion window."
+Assert-CpcvTray ($traySource.Contains('Configure tmux path insertion...')) "Tray no longer labels the remote tmux action clearly."
+Assert-CpcvTray ($traySource.Contains('cpcvTrayTmuxCrossPlatformRadio') -and $traySource.Contains('Windows Alt-V + macOS Ctrl-V')) "Tray no longer offers the paired Windows Alt-V and macOS Ctrl-V shortcut."
+Assert-CpcvTray ($traySource.Contains('tmux does not detect OS')) "Tray paired-shortcut UI could imply that tmux detects a client operating system."
+Assert-CpcvTray ($traySource.Contains('function Start-CpcvTrayTmuxRemoteJob') -and $traySource.Contains('Receive-CpcvTrayTmuxRemoteJob -Job $job')) "Tray tmux actions no longer leave the WinForms UI thread before waiting on remote commands."
 Assert-CpcvTray ($traySource.Contains('function Show-CpcvTrayRecentActivityWindow') -and $traySource.Contains('Get-CpcvTrayRecentActivityText')) "Tray no longer provides the bounded recent-activity window."
 Assert-CpcvTray ($traySource.Contains('cpcvTrayRecentActivityRefreshButton')) "Recent-activity window no longer exposes a refresh action."
 Assert-CpcvTray ($traySource.Contains('"Settings..."') -and $traySource.Contains('"View recent activity..."')) "Tray no longer labels the customer-facing settings and activity actions clearly."
 Assert-CpcvTray ($traySource -match '(?s)\$settingsButton\.Add_Click\(\{.*?Show-CpcvTraySettingsWindow') "Status dashboard Settings button is not wired to the Settings window."
+Assert-CpcvTray ($traySource -match '(?s)\$tmuxButton\.Add_Click\(\{.*?Show-CpcvTrayTmuxSetupWindow') "Status dashboard tmux button is not wired to the tmux path-insertion window."
 Assert-CpcvTray ($traySource -match '(?s)\$logButton\.Add_Click\(\{.*?Show-CpcvTrayRecentActivityWindow') "Status dashboard activity button is not wired to the recent-activity window."
 Assert-CpcvTray ($traySource -match '(?s)\$logItem\.Add_Click\(\{.*?Show-CpcvTrayRecentActivityWindow') "Tray activity menu item is not wired to the recent-activity window."
 Assert-CpcvTray ($traySource -match '(?s)\$configItem\.Add_Click\(\{.*?Show-CpcvTraySettingsWindow') "Tray Settings menu item is not wired to the Settings window."
+Assert-CpcvTray ($traySource -match '(?s)\$tmuxItem\.Add_Click\(\{.*?Show-CpcvTrayTmuxSetupWindow') "Tray tmux menu item is not wired to the tmux path-insertion window."
+
+$crossPlatformTmuxChoice = Resolve-CpcvTrayTmuxPathInsertionChoice -Mode CrossPlatform
+Assert-CpcvTray ($crossPlatformTmuxChoice.Table -eq 'root' -and $crossPlatformTmuxChoice.Key -eq 'C-v' -and $crossPlatformTmuxChoice.SecondaryTable -eq 'root' -and $crossPlatformTmuxChoice.SecondaryKey -eq 'M-v') "Tray tmux UI no longer selects the paired Windows Alt-V and macOS Ctrl-V binding."
+$recommendedTmuxChoice = Resolve-CpcvTrayTmuxPathInsertionChoice -Mode Recommended
+Assert-CpcvTray ($recommendedTmuxChoice.Table -eq 'prefix' -and $recommendedTmuxChoice.Key -eq 'v' -and -not $recommendedTmuxChoice.SecondaryTable) "Tray tmux UI no longer offers portable prefix/v as an alternative."
+$rawTmuxChoice = Resolve-CpcvTrayTmuxPathInsertionChoice -Mode RawCtrlV
+Assert-CpcvTray ($rawTmuxChoice.Table -eq 'root' -and $rawTmuxChoice.Key -eq 'C-v') "Tray tmux UI no longer treats raw Ctrl-V as an explicit advanced choice."
+$invalidTmuxChoiceRejected = $false
+try { Resolve-CpcvTrayTmuxPathInsertionChoice -Mode Custom -CustomKey ';' | Out-Null } catch { $invalidTmuxChoiceRejected = $true }
+Assert-CpcvTray $invalidTmuxChoiceRejected "Tray tmux UI accepted unsafe custom key syntax."
+$invalidPairedTmuxBindingRejected = $false
+try { Test-CpcvRemoteTmuxBinding -Table root -Key 'C-v' -SecondaryTable root -SecondaryKey 'M-v;touch' | Out-Null } catch { $invalidPairedTmuxBindingRejected = $true }
+Assert-CpcvTray $invalidPairedTmuxBindingRejected "Tray tmux helper accepted unsafe paired shortcut syntax."
+Assert-CpcvTray ((Get-CpcvTrayTmuxStartupLine) -eq 'run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux') "Tray tmux UI no longer exposes the user-owned startup line."
+
+# Remote tmux work must be collected without blocking the UI event handler,
+# then removed promptly; exercise that boundary with a harmless local job so
+# this test never opens SSH or touches a tmux server.
+$tmuxAsyncJob = Start-Job -ScriptBlock { [pscustomobject]@{ Ok = $true; Detail = 'synthetic tmux state' } }
+try {
+    $deadline = (Get-Date).AddSeconds(10)
+    while ($tmuxAsyncJob.State -notin @('Completed', 'Failed', 'Stopped', 'Disconnected') -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 50
+    }
+    $tmuxAsyncResult = Receive-CpcvTrayTmuxRemoteJob -Job $tmuxAsyncJob
+    Assert-CpcvTray ($tmuxAsyncResult.Completed -and $tmuxAsyncResult.Ok -and $tmuxAsyncResult.Result.Ok) "Tray tmux async job completion was not collected safely."
+    Assert-CpcvTray ($null -eq (Get-Job -Id $tmuxAsyncJob.Id -ErrorAction SilentlyContinue)) "Tray tmux async job was not removed after completion."
+}
+finally {
+    Remove-Job -Job $tmuxAsyncJob -Force -ErrorAction SilentlyContinue
+}
+
+$tmuxCancelledJob = Start-Job -ScriptBlock { Start-Sleep -Seconds 30 }
+try {
+    $deadline = (Get-Date).AddSeconds(10)
+    while ($tmuxCancelledJob.State -eq 'NotStarted' -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
+    Stop-CpcvTrayTmuxRemoteJob -Job $tmuxCancelledJob
+    Assert-CpcvTray ($null -eq (Get-Job -Id $tmuxCancelledJob.Id -ErrorAction SilentlyContinue)) "Tray tmux async job was not removed after cancellation."
+}
+finally {
+    Remove-Job -Job $tmuxCancelledJob -Force -ErrorAction SilentlyContinue
+}
 
 $healthyStyle = Get-CpcvTrayStatusStyle -Level "Healthy"
 $warningStyle = Get-CpcvTrayStatusStyle -Level "Warning"

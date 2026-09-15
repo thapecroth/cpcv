@@ -29,15 +29,17 @@
 
 cpcv is a small desktop companion for a local-to-remote terminal workflow. It
 watches images you already copied, uploads them to your own SSH target, and
-lets tmux insert the remote `latest.png` path into only the active pane. It
-does not capture your screen or silently replace your clipboard with text.
+lets tmux insert the remote `latest.png` path into only the active pane. The
+no-configuration plugin fallback is tmux's prefix followed by `v`, while the
+desktop integration lets you explicitly choose a shortcut. It does not capture
+your screen or silently replace your clipboard with text.
 
 ## Why cpcv?
 
 | You need | cpcv gives you |
 | --- | --- |
 | Images available to a remote coding session | Automatic SSH/SCP upload to your own target. |
-| A paste that lands in the right place | `Ctrl-V` inserts the path only in the tmux pane where you press it. |
+| A paste that lands in the right place | A configurable tmux shortcut—including Windows **Alt-V** plus macOS **Ctrl-V**—inserts the path only in the tmux pane where you press it. |
 | Confidence that the upload happened | A Windows tray icon or macOS menu-bar app shows service health and the age of the latest upload. |
 | A simple, private setup | No hosted service, account, browser extension, or replacement screenshot tool. |
 
@@ -51,7 +53,7 @@ remain available for people who prefer them or need an offline install.
 >
 > - Use Windows 10/11 or macOS 11+.
 > - Have a normal SSH connection to a POSIX host. `tmux` is required on that
->   host only for pane-specific `Ctrl-V` paste.
+>   host only for pane-specific path insertion.
 > - Replace `image-box` below with your own working SSH alias or host. Confirm
 >   it works without an interactive prompt using
 >   `ssh -o BatchMode=yes image-box true` before depending on cpcv.
@@ -89,8 +91,9 @@ are preserved.
 The final setup-status page tells you whether the local watcher and tray app
 started, whether the SSH computer accepted a non-interactive connection,
 whether `tmux` is installed there, and whether the optional cpcv tmux plugin
-files were installed. The tmux plugin task is off by default and Setup never
-edits the remote `~/.tmux.conf`.
+files were installed. The tmux plugin task is off by default. After Setup, the
+tray's **Configure tmux path insertion…** action can install or update the
+optional integration; neither it nor Setup edits the remote `~/.tmux.conf`.
 
 Setup starts the watcher and branded tray icon now and at sign-in. Confirm your
 target when it is ready:
@@ -106,6 +109,14 @@ and restarts the owned local service when you save, so there is no need to edit
 environment variables override saved values or `CPCV_CONFIG` selects a
 different settings file. **View recent activity…** shows a bounded, redacted tail
 of local activity instead of opening the raw log file.
+
+For pane-specific insertion, choose **Configure tmux path insertion…** from
+the tray menu. It opens on the cross-platform choice: **Windows Alt-V + macOS
+Ctrl-V**. This deliberately binds both tmux keys (`M-v` and `C-v`) on the
+shared remote server; it does not try to detect the client OS. The portable
+**tmux prefix, then v**, a custom prefix key, and raw **Ctrl-V**-only remain
+available. Choosing **Apply** explicitly updates only cpcv-owned remote plugin
+and configuration files; it never changes your tmux configuration file.
 
 #### Windows portable ZIP (advanced)
 
@@ -128,6 +139,10 @@ keys, and proxy rules in your normal SSH configuration—not in `config.psd1`.
 If you only want automatic uploads and not tmux paste, omit
 `-DeployRemoteHelpers`.
 
+Once the tray is running, **Configure tmux path insertion…** is the easier way
+to install or update those optional files and choose its shortcut. The
+PowerShell command remains useful for unattended or script-driven setup.
+
 Do not run a portable install and the setup-wizard install at the same time.
 Remove the old portable startup/tray integration before switching to Setup.
 
@@ -140,13 +155,16 @@ cpcv-setup
 
 Homebrew installs the package only; `cpcv-setup` explicitly creates and starts
 the current-user services. Click the cpcv menu-bar icon, choose **Settings...**,
-set your SSH target to `image-box`, and save. Then verify the connection and
-install the optional tmux helper:
+set your SSH target to `image-box`, and save. Then verify the connection. For
+the optional pane-specific integration, choose **Configure tmux path
+insertion…** from that same menu bar:
 
 ```bash
 ssh image-box true
-cpcv-deploy-tmux --host image-box
 ```
+
+The `cpcv-deploy-tmux --host image-box` command remains available for
+unattended or script-driven deployment.
 
 #### macOS universal ZIP (alternative)
 
@@ -158,13 +176,15 @@ bash macos/install-tray.sh --prebuilt
 ```
 
 Click the cpcv menu-bar icon, choose **Settings…**, set your SSH target to
-`image-box`, and save. Then verify the connection and install the optional
-tmux helper:
+`image-box`, and save. Then verify the connection and, if wanted, choose
+**Configure tmux path insertion…** from the same menu:
 
 ```bash
 ssh image-box true
-bash macos/deploy-remote-tmux-cpcv-plugin.sh --host image-box
 ```
+
+For script-driven deployment, use
+`bash macos/deploy-remote-tmux-cpcv-plugin.sh --host image-box` instead.
 
 The menu-bar app and local uploader start now and at sign-in. If you use a
 remote folder other than `clipboard-images`, pass the same value to the deploy
@@ -179,7 +199,24 @@ The remote helper deliberately never edits your tmux configuration. On
 run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
 ```
 
-Reload an already-running tmux server:
+Open **Configure tmux path insertion…** from the Windows tray icon or macOS
+menu-bar icon. Its selected default is **Windows Alt-V + macOS Ctrl-V**: tmux
+binds both `M-v` and `C-v`, so each client can use its preferred key without
+tmux guessing the operating system. A portable **tmux prefix, then v** binding,
+a custom prefix key, and raw **Ctrl-V**-only are also available. When you
+explicitly apply the choice, it installs or updates only marked cpcv files on
+the configured SSH account and saves the selection in cpcv's remote
+configuration. If the default tmux server is already running, it reloads cpcv
+there so the choice can work immediately. It still never edits
+`~/.tmux.conf`: copy the one `run-shell` line above into your own configuration
+so the integration persists after the server restarts.
+
+The cross-platform choice intentionally replaces ordinary `Ctrl-V` handling in
+that remote tmux server for clients that forward raw `Ctrl-V`. On Windows, Warp
+can consume bare `Ctrl-V` before SSH or tmux sees it; use **Alt-V** there
+instead. `Alt-V` must be forwarded by the Windows terminal as tmux `M-v`.
+
+For a manual reload at any time, run:
 
 ```bash
 tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"
@@ -194,20 +231,23 @@ after your SSH configuration is ready. With Homebrew, use
 
 1. Take a screenshot or copy an image as usual.
 2. Wait a few seconds for the status icon to report a successful upload.
-3. Press physical **Ctrl-V** in the remote tmux pane that should receive the
-   path.
+3. Press the configured tmux shortcut in the remote pane that should receive
+   the path: **Alt-V** from Windows or **Ctrl-V** from macOS for the selected
+   cross-platform choice.
 
 | Platform | A healthy first upload looks like |
 | --- | --- |
 | Windows | Hover the cpcv tray icon: `Healthy - Uploaded …`. `No upload yet` is normal until the first image. |
 | macOS | The menu-bar icon shows a checkmark when healthy; it spins during upload and shows a warning when attention is needed. |
 
-`Ctrl-V` inserts the remote path into that one tmux pane. It does not alter
-the host clipboard. Use **Copy latest path** from the tray or menu-bar app
-when you explicitly want the path as text.
+The configured shortcut inserts the remote path into that one tmux pane. It
+does not alter the host clipboard. Use **Copy latest path** from the tray or
+menu-bar app when you explicitly want the path as text.
 
-> **Warp users:** use physical **Ctrl-V**. Warp handles `Cmd-V` itself before
-> tmux receives it.
+The cross-platform choice is explicit because it captures raw `Ctrl-V` in the
+remote tmux server. The no-configuration plugin fallback remains tmux prefix,
+then `v`, for terminals where either raw shortcut would be undesirable; see
+[customization](#status-troubleshooting-and-customization).
 
 ## What happens after setup?
 
@@ -215,7 +255,7 @@ when you explicitly want the path as text.
 | --- | --- |
 | Screenshot or copy an image | Leaves the image on your local clipboard. |
 | Wait for the background upload | Stores a timestamped image on the SSH target and updates `latest.png`. |
-| Press `Ctrl-V` in tmux | Inserts the remote `latest.png` path in that pane only. |
+| Press the configured tmux shortcut | Inserts the remote `latest.png` path in that pane only. |
 | Need the path outside tmux | Lets you explicitly copy the last validated path from the status app. |
 
 `latest.png` normally lives at `~/clipboard-images/latest.png` on the SSH
@@ -227,22 +267,37 @@ server to run or account to create.
 | If this happens | Try this |
 | --- | --- |
 | Uploads are not completing | Verify `ssh image-box true`, then open the cpcv status view and check the private configuration. |
-| `Ctrl-V` does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"`. |
+| Your configured tmux shortcut does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"`. For the cross-platform choice, verify Windows forwards **Alt-V** as `M-v`; Warp may consume bare **Ctrl-V**. **Configure tmux path insertion…** in either desktop app can also check and reapply cpcv's remote integration. |
 | tmux says `no image` | Copy an image locally and wait for the first upload. |
-| You changed server or remote folder | Update **Settings…** in the macOS menu bar or Windows tray, then redeploy the remote tmux helper to that target. |
+| You changed server or remote folder | Update **Settings…**, then use **Configure tmux path insertion…** in either desktop app or redeploy the remote tmux helper from a script. |
 
 On macOS, `bash macos/cpcv-macos-ctl.sh doctor` checks the local service, SSH
 reachability, remote directory, and clock synchronization. On Windows,
 right-click the tray icon and choose **View status** for the dashboard,
-**Settings…**, **View recent activity…**, and service controls.
+**Settings…**, **Configure tmux path insertion…**, **View recent activity…**,
+and service controls.
+
+Use **Configure tmux path insertion…** in either desktop app for the supported
+cross-platform, portable, custom-prefix, and raw `Ctrl-V` choices. The manual
+tmux options below are for advanced use; because they live in your own tmux
+configuration, they override the selection saved by the desktop action and
+intentionally select one binding instead of the paired cross-platform preset.
 
 You can customize tmux before its `run-shell` line:
 
 ```tmux
-# Hide cpcv's tmux status item, refresh it every five seconds, or choose another key.
+# The portable default is tmux prefix, then v. Hide cpcv's status item,
+# refresh it every five seconds, or choose another key in the prefix table.
 set -g @cpcv-status off
 set -g @cpcv-status-refresh 5
-set -g @cpcv-paste-key M-v
+set -g @cpcv-paste-table prefix
+set -g @cpcv-paste-key p
+
+# Optional: capture raw Ctrl-V instead. Do this only when your terminal
+# forwards Ctrl-V to tmux; it will replace normal Ctrl-V behavior in that tmux
+# session.
+# set -g @cpcv-paste-table root
+# set -g @cpcv-paste-key C-v
 ```
 
 For all configuration fields, diagnostics, and platform behavior, see
@@ -253,8 +308,9 @@ For all configuration fields, diagnostics, and platform behavior, see
 - cpcv uploads only image clipboard content through your existing SSH setup;
   it does not replace the image clipboard with a path.
 - It uses bounded, redacted diagnostics and hard timeouts for SSH/SCP commands.
-- Installers operate only on cpcv-owned local services and marked remote helper
-  files. They do not edit shell startup files, `PATH`, or `~/.tmux.conf`.
+- Installers and **Configure tmux path insertion…** operate only on cpcv-owned
+  local services and marked remote helper/configuration files. They do not edit
+  shell startup files, `PATH`, or `~/.tmux.conf`.
 - Private configuration, cached images, and logs can be sensitive. They stay
   outside the checkout and are preserved by default when you uninstall.
 

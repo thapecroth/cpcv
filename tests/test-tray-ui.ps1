@@ -252,4 +252,197 @@ function Invoke-CpcvTrayRecentActivityDialogProbe {
 Invoke-CpcvTrayRecentActivityDialogProbe
 Assert-CpcvTrayUi ($script:trayUiActivityReadCount -ge 2) 'Recent-activity Refresh did not reload the bounded activity source.'
 
-Write-Host 'PASS: STA WinForms status dialog constructed with synthetic state; upload/start buttons dispatched only to stubs; error state disabled upload; Settings saved the edited SSH computer name through the persistence helper and restarted the service; recent activity rendered protected text and refreshed.'
+$script:trayUiTmuxChecks = @()
+$script:trayUiTmuxApplies = @()
+function Get-CpcvRemoteTmuxState {
+    param([string]$Table, [string]$Key, [string]$SecondaryTable, [string]$SecondaryKey)
+    $script:trayUiTmuxChecks += [pscustomobject]@{ Table = $Table; Key = $Key; SecondaryTable = $SecondaryTable; SecondaryKey = $SecondaryKey }
+    return [pscustomobject]@{
+        Ok = $true
+        Connection = 'Connected'
+        Tmux = 'Installed'
+        Plugin = 'Installed'
+        Server = 'Running'
+        Table = $Table
+        Key = $Key
+        SecondaryTable = $SecondaryTable
+        SecondaryKey = $SecondaryKey
+        Binding = 'Available'
+        SecondaryBinding = if ($SecondaryTable) { 'Available' } else { 'NotSelected' }
+        Override = 'None'
+        Detail = ''
+    }
+}
+function Apply-CpcvRemoteTmuxBinding {
+    param([string]$Table, [string]$Key, [string]$SecondaryTable, [string]$SecondaryKey)
+    $script:trayUiTmuxApplies += [pscustomobject]@{ Table = $Table; Key = $Key; SecondaryTable = $SecondaryTable; SecondaryKey = $SecondaryKey }
+    $state = [pscustomobject]@{
+        Ok = $true
+        Connection = 'Connected'
+        Tmux = 'Installed'
+        Plugin = 'Installed'
+        Server = 'Running'
+        Table = $Table
+        Key = $Key
+        SecondaryTable = $SecondaryTable
+        SecondaryKey = $SecondaryKey
+        Binding = 'Managed'
+        SecondaryBinding = if ($SecondaryTable) { 'Managed' } else { 'NotSelected' }
+        Override = 'None'
+        Detail = ''
+    }
+    return [pscustomobject]@{
+        Ok = $true
+        Reason = 'applied'
+        Detail = 'The cpcv binding is active in the default tmux server.'
+        Applied = $true
+        NeedsStartupLine = $true
+        State = $state
+    }
+}
+
+function Invoke-CpcvTrayTmuxDialogProbe {
+    $script:trayUiTmuxDialogSeen = $false
+    $script:trayUiTmuxProbeFailure = ''
+    $script:trayUiTmuxChecks = @()
+    $script:trayUiTmuxApplies = @()
+    $script:trayUiAction = ''
+    $deadline = (Get-Date).AddSeconds(6)
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 100
+    $timer.Add_Tick({
+        $form = @([System.Windows.Forms.Application]::OpenForms | Where-Object { $_.Name -eq 'cpcvTrayTmuxSetupWindow' }) | Select-Object -First 1
+        if (-not $form) { return }
+        try {
+            if ((Get-Date) -gt $deadline) { throw 'Tmux path-insertion window probe exceeded its six-second deadline.' }
+            if ($script:trayUiTmuxDialogSeen) { return }
+            $script:trayUiTmuxDialogSeen = $true
+            $crossPlatform = @($form.Controls.Find('cpcvTrayTmuxCrossPlatformRadio', $true)) | Select-Object -First 1
+            $crossPlatformHint = @($form.Controls.Find('cpcvTrayTmuxCrossPlatformHint', $true)) | Select-Object -First 1
+            $recommended = @($form.Controls.Find('cpcvTrayTmuxRecommendedRadio', $true)) | Select-Object -First 1
+            $custom = @($form.Controls.Find('cpcvTrayTmuxCustomRadio', $true)) | Select-Object -First 1
+            $raw = @($form.Controls.Find('cpcvTrayTmuxRawRadio', $true)) | Select-Object -First 1
+            $customKey = @($form.Controls.Find('cpcvTrayTmuxCustomKeyInput', $true)) | Select-Object -First 1
+            $warning = @($form.Controls.Find('cpcvTrayTmuxRawWarning', $true)) | Select-Object -First 1
+            $status = @($form.Controls.Find('cpcvTrayTmuxStatusText', $true)) | Select-Object -First 1
+            $startup = @($form.Controls.Find('cpcvTrayTmuxStartupLine', $true)) | Select-Object -First 1
+            $check = @($form.Controls.Find('cpcvTrayTmuxCheckButton', $true)) | Select-Object -First 1
+            $apply = @($form.Controls.Find('cpcvTrayTmuxApplyButton', $true)) | Select-Object -First 1
+            Assert-CpcvTrayUi ($null -ne $crossPlatform -and $null -ne $crossPlatformHint -and $null -ne $recommended -and $null -ne $custom -and $null -ne $raw -and $null -ne $customKey) 'Tmux path-insertion window did not construct all binding choices.'
+            Assert-CpcvTrayUi ($crossPlatform.Checked -and $crossPlatformHint.Visible -and $crossPlatformHint.Text -match 'every connected client' -and $crossPlatformHint.Text -match 'Alt-V' -and -not $customKey.Enabled) 'Tmux path-insertion window did not default to its paired Windows Alt-V and macOS Ctrl-V choice.'
+            Assert-CpcvTrayUi ($null -ne $warning -and $null -ne $status -and $status.ReadOnly) 'Tmux path-insertion window did not construct its protected warning and status controls.'
+            Assert-CpcvTrayUi ($null -ne $startup -and $startup.ReadOnly -and $startup.Text -eq 'run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux') 'Tmux path-insertion window did not display the user-owned startup line.'
+            Assert-CpcvTrayUi ($null -ne $check -and $null -ne $apply -and $check.Enabled -and $apply.Enabled) 'Tmux path-insertion window did not expose enabled explicit Check and Apply actions.'
+            $check.PerformClick()
+            Assert-CpcvTrayUi ($script:trayUiTmuxChecks.Count -eq 1 -and $script:trayUiTmuxChecks[0].Table -eq 'root' -and $script:trayUiTmuxChecks[0].Key -eq 'C-v' -and $script:trayUiTmuxChecks[0].SecondaryTable -eq 'root' -and $script:trayUiTmuxChecks[0].SecondaryKey -eq 'M-v') 'Tmux Check did not use the paired Windows Alt-V and macOS Ctrl-V binding.'
+            Assert-CpcvTrayUi ($status.Text -match 'Connected' -and $status.Text -match 'Available') 'Tmux Check did not render the safe remote status.'
+            $apply.PerformClick()
+            Assert-CpcvTrayUi ($script:trayUiTmuxApplies.Count -eq 1 -and $script:trayUiTmuxApplies[0].Table -eq 'root' -and $script:trayUiTmuxApplies[0].Key -eq 'C-v' -and $script:trayUiTmuxApplies[0].SecondaryTable -eq 'root' -and $script:trayUiTmuxApplies[0].SecondaryKey -eq 'M-v') 'Tmux Apply did not send both paired binding arguments.'
+            Assert-CpcvTrayUi ($status.Text -match 'Managed') 'Tmux Apply did not render the paired applied binding state.'
+            $raw.Checked = $true
+            Assert-CpcvTrayUi ($raw.Checked -and $warning.Visible) 'Tmux path-insertion window did not disclose the raw Ctrl-V warning.'
+        }
+        catch {
+            $script:trayUiTmuxProbeFailure = $_.Exception.Message
+        }
+        finally {
+            if (-not $form.IsDisposed) { $form.Close() }
+        }
+    })
+    $result = $false
+    try {
+        $timer.Start()
+        $result = Show-CpcvTrayTmuxSetupWindow -TestMode
+    }
+    finally {
+        $timer.Stop()
+        $timer.Dispose()
+    }
+    Assert-CpcvTrayUi $script:trayUiTmuxDialogSeen 'Tmux path-insertion window was not shown before the UI probe deadline.'
+    Assert-CpcvTrayUi ([string]::IsNullOrWhiteSpace($script:trayUiTmuxProbeFailure)) "Tmux path-insertion window probe failed: $($script:trayUiTmuxProbeFailure)"
+    return [bool]$result
+}
+
+$tmuxApplied = Invoke-CpcvTrayTmuxDialogProbe
+Assert-CpcvTrayUi $tmuxApplied 'Tmux path-insertion window did not report a successful explicit apply.'
+Assert-CpcvTrayUi ([string]::IsNullOrWhiteSpace($script:trayUiAction)) 'Tmux path-insertion window unexpectedly restarted or changed the local uploader service.'
+
+# The production path launches remote SSH/SCP work in a job and lets the
+# WinForms timer keep processing messages. Replace only the job factory with a
+# harmless local job; this verifies the dialog becomes busy immediately,
+# receives its result later, and leaves no job behind without using a network.
+$script:trayUiTmuxAsyncStarts = @()
+$script:trayUiTmuxAsyncJobIds = @()
+function Start-CpcvTrayTmuxRemoteJob {
+    param([string]$Operation, [string]$Table, [string]$Key, [string]$SecondaryTable, [string]$SecondaryKey)
+
+    $script:trayUiTmuxAsyncStarts += [pscustomobject]@{ Operation = $Operation; Table = $Table; Key = $Key; SecondaryTable = $SecondaryTable; SecondaryKey = $SecondaryKey }
+    $job = Start-Job -ScriptBlock {
+        param([string]$InnerOperation, [string]$InnerTable, [string]$InnerKey, [string]$InnerSecondaryTable, [string]$InnerSecondaryKey)
+        Start-Sleep -Milliseconds 300
+        return [pscustomobject]@{
+            Ok = $true; Connection = 'Connected'; Tmux = 'Installed'; Plugin = 'Installed'; Server = 'Running'
+            Table = $InnerTable; Key = $InnerKey; SecondaryTable = $InnerSecondaryTable; SecondaryKey = $InnerSecondaryKey
+            Binding = 'Available'; SecondaryBinding = if ($InnerSecondaryTable) { 'Available' } else { 'NotSelected' }; Override = 'None'; Detail = ''
+        }
+    } -ArgumentList @($Operation, $Table, $Key, $SecondaryTable, $SecondaryKey)
+    $script:trayUiTmuxAsyncJobIds += $job.Id
+    return $job
+}
+
+function Invoke-CpcvTrayTmuxAsyncDialogProbe {
+    $script:trayUiTmuxAsyncDialogSeen = $false
+    $script:trayUiTmuxAsyncProbeFailure = ''
+    $script:trayUiTmuxAsyncStarts = @()
+    $script:trayUiTmuxAsyncJobIds = @()
+    $script:trayUiTmuxAsyncStep = 0
+    $deadline = (Get-Date).AddSeconds(10)
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 75
+    $timer.Add_Tick({
+        $form = @([System.Windows.Forms.Application]::OpenForms | Where-Object { $_.Name -eq 'cpcvTrayTmuxSetupWindow' }) | Select-Object -First 1
+        if (-not $form) { return }
+        try {
+            if ((Get-Date) -gt $deadline) { throw 'Async tmux path-insertion window probe exceeded its ten-second deadline.' }
+            $script:trayUiTmuxAsyncDialogSeen = $true
+            $check = @($form.Controls.Find('cpcvTrayTmuxCheckButton', $true)) | Select-Object -First 1
+            $apply = @($form.Controls.Find('cpcvTrayTmuxApplyButton', $true)) | Select-Object -First 1
+            $status = @($form.Controls.Find('cpcvTrayTmuxStatusText', $true)) | Select-Object -First 1
+            Assert-CpcvTrayUi ($null -ne $check -and $null -ne $apply -and $null -ne $status) 'Async tmux path-insertion window did not construct its controls.'
+            if ($script:trayUiTmuxAsyncStep -eq 0) {
+                $check.PerformClick()
+                Assert-CpcvTrayUi (-not $check.Enabled -and -not $apply.Enabled) 'Async tmux Check did not return to the UI loop in a busy state.'
+                $script:trayUiTmuxAsyncStep = 1
+                return
+            }
+            if ($script:trayUiTmuxAsyncStep -eq 1 -and $status.Text -match 'Connected' -and $status.Text -match 'Available') {
+                Assert-CpcvTrayUi ($check.Enabled -and $apply.Enabled) 'Async tmux Check did not restore controls after its background job completed.'
+                $script:trayUiTmuxAsyncStep = 2
+                $form.Close()
+            }
+        }
+        catch {
+            $script:trayUiTmuxAsyncProbeFailure = $_.Exception.Message
+            if (-not $form.IsDisposed) { $form.Close() }
+        }
+    })
+    try {
+        $timer.Start()
+        [void](Show-CpcvTrayTmuxSetupWindow -TestMode -UseAsyncWorker)
+    }
+    finally {
+        $timer.Stop()
+        $timer.Dispose()
+    }
+    Assert-CpcvTrayUi $script:trayUiTmuxAsyncDialogSeen 'Async tmux path-insertion window was not shown before the UI probe deadline.'
+    Assert-CpcvTrayUi ([string]::IsNullOrWhiteSpace($script:trayUiTmuxAsyncProbeFailure)) "Async tmux path-insertion window probe failed: $($script:trayUiTmuxAsyncProbeFailure)"
+    Assert-CpcvTrayUi ($script:trayUiTmuxAsyncStep -eq 2) 'Async tmux Check did not render its completed result before the dialog closed.'
+}
+
+Invoke-CpcvTrayTmuxAsyncDialogProbe
+Assert-CpcvTrayUi ($script:trayUiTmuxAsyncStarts.Count -eq 1 -and $script:trayUiTmuxAsyncStarts[0].Operation -eq 'Check' -and $script:trayUiTmuxAsyncStarts[0].Table -eq 'root' -and $script:trayUiTmuxAsyncStarts[0].Key -eq 'C-v' -and $script:trayUiTmuxAsyncStarts[0].SecondaryTable -eq 'root' -and $script:trayUiTmuxAsyncStarts[0].SecondaryKey -eq 'M-v') 'Async tmux Check did not start both paired bindings in a background job.'
+foreach ($jobId in @($script:trayUiTmuxAsyncJobIds)) {
+    Assert-CpcvTrayUi ($null -eq (Get-Job -Id $jobId -ErrorAction SilentlyContinue)) 'Async tmux dialog left its completed background job behind.'
+}
+
+Write-Host 'PASS: STA WinForms status dialog constructed with synthetic state; upload/start buttons dispatched only to stubs; error state disabled upload; Settings saved the edited SSH computer name through the persistence helper and restarted the service; recent activity rendered protected text and refreshed; tmux path insertion checked and applied only explicit remote binding choices without restarting the local uploader; its production job path stays responsive and removes completed jobs.'

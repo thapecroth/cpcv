@@ -132,6 +132,7 @@ try {
         "cpcv-windows/README.md",
         "cpcv-windows/LICENSE",
         "cpcv-windows/cpcv-core.ps1",
+        "cpcv-windows/cpcv-remote.ps1",
         "cpcv-windows/cpcv-watch.ps1",
         "cpcv-windows/cpcv-guardian.ps1",
         "cpcv-windows/cpcv-tray.ps1",

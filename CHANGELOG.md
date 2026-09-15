@@ -7,6 +7,24 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.6.0 - 2026-09-14
+
+### Added
+
+- Windows tray and macOS menu-bar controls for the optional remote tmux path
+  insertion, including read-only status, explicit apply, and a displayed
+  user-owned startup line.
+- A cross-platform tmux shortcut profile: Windows `Alt-V` (`M-v`) and macOS
+  `Ctrl-V` (`C-v`) are installed together on the same shared tmux server.
+
+### Changed
+
+- The no-configuration tmux plugin fallback is now the portable tmux prefix
+  followed by `v`; custom prefix and raw `Ctrl-V`-only profiles remain
+  available.
+- cpcv verifies both requested shortcut slots before changing managed bindings
+  and preserves explicit user-owned tmux settings and configuration files.
+
 ## v0.5.0 - 2026-09-12
 
 ### Added
