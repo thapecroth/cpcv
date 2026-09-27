@@ -4,6 +4,7 @@ cache/
 *.log.*
 last-hash.txt
 last-remote-path.txt
+upload-status.txt
 watch.heartbeat
 status-check*.txt
 diag-*.txt

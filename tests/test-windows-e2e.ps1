@@ -100,6 +100,7 @@ public static class FakeOpenSsh {
         HostAlias = "e2e-host"; RemoteDir = "clipboard-images"; RemoteHome = "/e2e-home"; DataRoot = $tempRoot
         LocalCache = (Join-Path $tempRoot "cache"); StateFile = (Join-Path $tempRoot "last-hash.txt")
         LastRemotePathFile = (Join-Path $tempRoot "last-remote-path.txt"); LogFile = (Join-Path $tempRoot "watch.log")
+        UploadStatusFile = (Join-Path $tempRoot "upload-status.txt")
         HeartbeatFile = (Join-Path $tempRoot "watch.heartbeat"); CommandTimeoutSeconds = 5; MaxCommandOutputBytes = 65536
         PollIntervalSeconds = 2; WatchdogCheckSeconds = 15; WatchdogStaleSeconds = 60
         MaxLogBytes = 65536; MaxCacheFiles = 10; MaxCacheBytes = 8388608; MaxImageBytes = 1048576; ConfigError = ""
@@ -145,10 +146,14 @@ public static class FakeOpenSsh {
     $env:CPCV_E2E_FAILURE = "ssh.exe"
     $failed = Publish-ClipboardImage -Force
     Assert-CpcvE2E (-not $failed.Ok -and $failed.Reason -eq "ssh-mkdir-failed") "A failed SSH mkdir was not surfaced as a retryable upload failure."
+    $failedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-CpcvE2E ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-failed") "The isolated failed upload did not persist a safe tray status."
     $env:CPCV_E2E_FAILURE = ""
     $recovered = Publish-ClipboardImage -Force
     Assert-CpcvE2E ($recovered.Ok -and $recovered.Reason -eq "uploaded") "The upload did not recover after the isolated transport failure."
     Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.LastRemotePathFile -Raw).Trim() -eq $recovered.RemotePath) "Recovered upload did not commit latest-path state."
+    $recoveredUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-CpcvE2E ($recoveredUploadStatus -and $recoveredUploadStatus.Result -eq "succeeded") "The isolated recovered upload did not clear its tray failure status."
 }
 finally {
     $env:PATH = $originalPath

@@ -15,6 +15,7 @@ Add-Type -AssemblyName System.Drawing
 
 $selection = Get-CpcvTrayIcon
 $notify = $null
+$statusIconCache = @{}
 try {
     if ($selection.IsFallback -or -not $selection.OwnsIcon) {
         throw "The checked-in branded ICO was not selected for the WinForms tray probe."
@@ -25,13 +26,30 @@ try {
     $notify.Visible = $true
     [System.Windows.Forms.Application]::DoEvents()
     if (-not $notify.Visible) { throw 'WinForms did not accept the branded tray icon.' }
+
+    foreach ($level in @('Warning', 'Error', 'Stopped', 'Unknown')) {
+        $statusIcon = Get-CpcvTrayStatusIcon -BaseIcon $selection.Icon -Level $level -Cache $statusIconCache
+        if ($null -eq $statusIcon -or $statusIcon.Handle -eq [IntPtr]::Zero -or [object]::ReferenceEquals($statusIcon, $selection.Icon)) {
+            throw "Tray status icon '$level' was not created."
+        }
+        if ($level -eq 'Warning' -and -not [object]::ReferenceEquals($statusIcon, (Get-CpcvTrayStatusIcon -BaseIcon $selection.Icon -Level $level -Cache $statusIconCache))) {
+            throw 'Tray status icon cache did not retain the warning icon.'
+        }
+        $notify.Icon = $statusIcon
+        [System.Windows.Forms.Application]::DoEvents()
+        if (-not $notify.Visible) { throw "WinForms did not retain the '$level' tray status icon." }
+    }
+    $notify.Icon = $selection.Icon
 }
 finally {
     if ($notify) {
         $notify.Visible = $false
         $notify.Dispose()
     }
+    foreach ($statusIcon in @($statusIconCache.Values)) {
+        if ($statusIcon) { $statusIcon.Dispose() }
+    }
     if ($selection -and $selection.OwnsIcon -and $selection.Icon) { $selection.Icon.Dispose() }
 }
 
-Write-Host 'PASS: branded ICO was accepted by the real STA WinForms NotifyIcon API and disposed cleanly.'
+Write-Host 'PASS: branded and dynamically badged ICOs were accepted by the real STA WinForms NotifyIcon API and disposed cleanly.'

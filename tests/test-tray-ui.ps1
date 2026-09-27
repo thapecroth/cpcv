@@ -26,7 +26,9 @@ function Invoke-CpcvTrayDialogProbe {
     param(
         [Parameter(Mandatory)]$State,
         [Parameter(Mandatory)][ValidateSet('upload', 'start', 'close')][string]$Action,
-        [switch]$ExpectUploadDisabled
+        [switch]$ExpectUploadDisabled,
+        [string]$ExpectedUploadText = '',
+        [string]$ExpectedServiceText = ''
     )
 
     $script:trayUiDialogSeen = $false
@@ -59,6 +61,8 @@ function Invoke-CpcvTrayDialogProbe {
             Assert-CpcvTrayUi ($null -ne $service) 'Status dashboard did not construct the service action button.'
             Assert-CpcvTrayUi ($null -ne $banner) 'Status dashboard did not construct its health banner.'
             Assert-CpcvTrayUi ($null -ne $logo -and $null -ne $logo.Image) 'Status dashboard did not construct the branded logo.'
+            if ($ExpectedUploadText) { Assert-CpcvTrayUi ($upload.Text -eq $ExpectedUploadText) "Status dashboard upload action was '$($upload.Text)', not '$ExpectedUploadText'." }
+            if ($ExpectedServiceText) { Assert-CpcvTrayUi ($service.Text -eq $ExpectedServiceText) "Status dashboard service action was '$($service.Text)', not '$ExpectedServiceText'." }
             if ($ExpectUploadDisabled) {
                 Assert-CpcvTrayUi (-not $upload.Enabled) 'Error-state dashboard left the upload action enabled.'
                 return
@@ -97,8 +101,11 @@ $baseState = [pscustomobject]@{
     Watchers = @([pscustomobject]@{ ProcessId = 202 })
     GuardianProbeAvailable = $true
     WatcherProbeAvailable = $true
-    Heartbeat = [pscustomobject]@{ ProcessId = 202; Status = 'idle failures=0' }
+    Heartbeat = [pscustomobject]@{ ProcessId = 202; Status = 'idle failures=0'; FailureCount = 0 }
     HeartbeatAgeSeconds = 1.2
+    IssueKind = ''
+    UploadFailureCount = 0
+    UploadFailureReason = ''
     LatestPath = '/home/tester/clipboard-images/latest.png'
     LatestUploadAt = [DateTimeOffset]::UtcNow
     LatestUploadAgeSeconds = 1.2
@@ -106,6 +113,17 @@ $baseState = [pscustomobject]@{
 
 Invoke-CpcvTrayDialogProbe -State $baseState -Action upload
 Assert-CpcvTrayUi ($script:trayUiAction -eq 'upload') 'Upload button did not invoke its protected action handler.'
+
+$retryState = $baseState.PSObject.Copy()
+$retryState.Level = 'Warning'
+$retryState.Summary = 'Background SSH connection timed out'
+$retryState.Detail = 'cpcv will retry automatically when it sees an image in the clipboard.'
+$retryState.IssueKind = 'Upload'
+$retryState.UploadFailureCount = 2
+$retryState.UploadFailureReason = 'ssh-mkdir-timeout'
+$retryState.Heartbeat = [pscustomobject]@{ ProcessId = 202; Status = 'idle failures=2'; FailureCount = 2 }
+Invoke-CpcvTrayDialogProbe -State $retryState -Action upload -ExpectedUploadText 'Retry clipboard upload' -ExpectedServiceText 'Restart service'
+Assert-CpcvTrayUi ($script:trayUiAction -eq 'upload') 'Upload-retry dashboard did not invoke its protected retry action.'
 
 $stoppedState = $baseState.PSObject.Copy()
 $stoppedState.Level = 'Stopped'

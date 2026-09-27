@@ -7,6 +7,13 @@ fixes increment the patch version.
 
 ## Unreleased
 
+### Fixed
+
+- Windows tray status now distinguishes a live watcher from a failed or
+  retrying clipboard upload. It shows a safe, actionable transport summary,
+  preserves the warning until cpcv confirms a later upload, and changes the
+  notification-area icon to a branded status badge.
+
 ## v0.6.0 - 2026-09-14
 
 ### Added

@@ -240,6 +240,13 @@ after your SSH configuration is ready. With Homebrew, use
 | Windows | Hover the cpcv tray icon: `Healthy - Uploaded …`. `No upload yet` is normal until the first image. |
 | macOS | The menu-bar icon shows a checkmark when healthy; it spins during upload and shows a warning when attention is needed. |
 
+On Windows, a yellow badged tray icon means cpcv's last upload was not
+confirmed. The hover text and **View status…** identify the safe failure stage
+(for example, a new background SSH connection timed out), retain the warning
+until a later upload succeeds, and offer a direct clipboard retry. A terminal
+SSH session can still work while a fresh non-interactive connection used by
+cpcv times out.
+
 The configured shortcut inserts the remote path into that one tmux pane. It
 does not alter the host clipboard. Use **Copy latest path** from the tray or
 menu-bar app when you explicitly want the path as text.
@@ -266,7 +273,8 @@ server to run or account to create.
 
 | If this happens | Try this |
 | --- | --- |
-| Uploads are not completing | Verify `ssh image-box true`, then open the cpcv status view and check the private configuration. |
+| Windows tray shows an upload warning | Open **View status…**. cpcv identifies whether the new SSH connection, SCP transfer, or `latest.png` confirmation failed, and retries automatically when it sees an image. Use **Retry clipboard upload** to try immediately, then **View recent activity…** for the redacted local diagnostic. |
+| Uploads are not completing | Verify `ssh image-box true`, then open the cpcv status view and check the private configuration. A working terminal session does not guarantee that every fresh background SSH/proxy connection will finish before cpcv's timeout. |
 | Your configured tmux shortcut does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"`. For the cross-platform choice, verify Windows forwards **Alt-V** as `M-v`; Warp may consume bare **Ctrl-V**. **Configure tmux path insertion…** in either desktop app can also check and reapply cpcv's remote integration. |
 | tmux says `no image` | Copy an image locally and wait for the first upload. |
 | You changed server or remote folder | Update **Settings…**, then use **Configure tmux path insertion…** in either desktop app or redeploy the remote tmux helper from a script. |

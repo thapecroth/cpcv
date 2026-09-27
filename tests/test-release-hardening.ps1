@@ -19,7 +19,7 @@ function New-CpcvTestProcessResult {
 }
 
 function Reset-CpcvTestUploadState {
-    foreach ($path in @($script:CpcvConfig.StateFile, $script:CpcvConfig.LastRemotePathFile, (Join-Path $script:CpcvConfig.LocalCache "latest.png"))) {
+    foreach ($path in @($script:CpcvConfig.StateFile, $script:CpcvConfig.LastRemotePathFile, $script:CpcvConfig.UploadStatusFile, (Join-Path $script:CpcvConfig.LocalCache "latest.png"))) {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     }
 }
@@ -97,6 +97,7 @@ try {
         HostAlias = "example-host"; RemoteDir = "clipboard-images"; RemoteHome = "/home/tester"; DataRoot = $tempRoot
         LocalCache = (Join-Path $tempRoot "cache"); StateFile = (Join-Path $tempRoot "last-hash.txt")
         LastRemotePathFile = (Join-Path $tempRoot "last-remote-path.txt"); LogFile = (Join-Path $tempRoot "watch.log")
+        UploadStatusFile = (Join-Path $tempRoot "upload-status.txt")
         HeartbeatFile = (Join-Path $tempRoot "watch.heartbeat"); CommandTimeoutSeconds = 35; MaxCommandOutputBytes = 65536
         PollIntervalSeconds = 2; WatchdogCheckSeconds = 15; WatchdogStaleSeconds = 120
         MaxLogBytes = 1048576; MaxCacheFiles = 2; MaxCacheBytes = 8388608; MaxImageBytes = 1048576; ConfigError = ""
@@ -106,10 +107,24 @@ try {
     Set-CpcvAtomicText -Path $script:CpcvConfig.HeartbeatFile -Value "2026-01-01T00:00:00.0000000Z pid=456 checking"
     $heartbeatInfo = Get-CpcvHeartbeatInfo -Path $script:CpcvConfig.HeartbeatFile
     Assert-Cpcv ($heartbeatInfo -and $heartbeatInfo.ProcessId -eq 456) "Valid heartbeat did not expose its process ID."
+    Assert-Cpcv ($heartbeatInfo.FailureCount -eq 0) "A checking heartbeat did not expose zero upload failures."
     Assert-Cpcv (Test-CpcvHeartbeat -Path $script:CpcvConfig.HeartbeatFile -ExpectedProcessId 456) "Expected heartbeat PID was rejected."
     Assert-Cpcv (-not (Test-CpcvHeartbeat -Path $script:CpcvConfig.HeartbeatFile -ExpectedProcessId 457)) "Unexpected heartbeat PID was accepted."
+    Set-CpcvAtomicText -Path $script:CpcvConfig.HeartbeatFile -Value "2026-01-01T00:00:00.0000000Z pid=456 idle failures=3"
+    $failedHeartbeatInfo = Get-CpcvHeartbeatInfo -Path $script:CpcvConfig.HeartbeatFile
+    Assert-Cpcv ($failedHeartbeatInfo -and $failedHeartbeatInfo.FailureCount -eq 3) "A retrying heartbeat did not expose its failure count."
     Set-Content -LiteralPath $script:CpcvConfig.HeartbeatFile -Value ("x" * 513) -NoNewline
     Assert-Cpcv (-not (Test-CpcvHeartbeat -Path $script:CpcvConfig.HeartbeatFile)) "Oversized corrupt heartbeat was accepted."
+
+    Set-CpcvUploadStatus -Result "failed" -Reason "ssh-mkdir-timeout"
+    $failedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-timeout") "A controlled failed upload status was not readable."
+    Set-CpcvUploadStatus -Result "failed" -Reason "untrusted reason with spaces"
+    $redactedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($redactedUploadStatus -and $redactedUploadStatus.Reason -eq "upload-failed") "Upload status accepted an uncontrolled failure reason."
+    Set-CpcvUploadStatus -Result "succeeded"
+    $successfulUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($successfulUploadStatus -and $successfulUploadStatus.Result -eq "succeeded" -and -not $successfulUploadStatus.Reason) "A successful upload did not clear its failure status."
 
     $script:CpcvConfig.MaxCommandOutputBytes = "malformed"
     Write-CpcvLog "config validation diagnostic"

@@ -35,6 +35,7 @@ function New-CpcvDefaultConfig {
         LocalCache            = (Join-Path $dataRoot "cache")
         StateFile             = (Join-Path $dataRoot "last-hash.txt")
         LastRemotePathFile    = (Join-Path $dataRoot "last-remote-path.txt")
+        UploadStatusFile      = (Join-Path $dataRoot "upload-status.txt")
         LogFile               = (Join-Path $dataRoot "watch.log")
         HeartbeatFile         = (Join-Path $dataRoot "watch.heartbeat")
         CommandTimeoutSeconds = 35
@@ -305,6 +306,7 @@ function Get-CpcvConfig {
     $cfg.LocalCache = Join-Path $cfg.DataRoot "cache"
     $cfg.StateFile = Join-Path $cfg.DataRoot "last-hash.txt"
     $cfg.LastRemotePathFile = Join-Path $cfg.DataRoot "last-remote-path.txt"
+    $cfg.UploadStatusFile = Join-Path $cfg.DataRoot "upload-status.txt"
     $cfg.LogFile = Join-Path $cfg.DataRoot "watch.log"
     $cfg.HeartbeatFile = Join-Path $cfg.DataRoot "watch.heartbeat"
     return $cfg
@@ -605,7 +607,109 @@ function Get-CpcvHeartbeatInfo {
         if (-not [DateTimeOffset]::TryParse($match.Groups['timestamp'].Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$timestamp)) { return $null }
         [long]$processId = 0
         if (-not [long]::TryParse($match.Groups['pid'].Value, [ref]$processId) -or $processId -gt [int]::MaxValue) { return $null }
-        return [pscustomobject]@{ Timestamp = $timestamp; ProcessId = [int]$processId; Status = $match.Groups['status'].Value }
+        [int]$failureCount = 0
+        if ($match.Groups['failures'].Success -and -not [int]::TryParse($match.Groups['failures'].Value, [ref]$failureCount)) { return $null }
+        return [pscustomobject]@{
+            Timestamp = $timestamp
+            ProcessId = [int]$processId
+            Status = $match.Groups['status'].Value
+            FailureCount = $failureCount
+        }
+    }
+    catch { return $null }
+}
+
+function Get-CpcvUploadStatusFilePath {
+    param([Parameter(Mandatory)]$Config)
+
+    try {
+        $path = [string]$Config.UploadStatusFile
+        if (-not [string]::IsNullOrWhiteSpace($path)) { return $path }
+        if (-not [string]::IsNullOrWhiteSpace([string]$Config.DataRoot)) {
+            return (Join-Path $Config.DataRoot "upload-status.txt")
+        }
+    }
+    catch { }
+    return ""
+}
+
+function ConvertTo-CpcvUploadStatusReason {
+    param([AllowNull()][string]$Reason)
+
+    # This status file is consumed by the notification-area UI.  It must carry
+    # only a small, controlled reason token -- never command output, a host,
+    # a path, or an exception message.
+    switch ([string]$Reason) {
+        "ssh-mkdir-timeout" { return "ssh-mkdir-timeout" }
+        "ssh-mkdir-failed" { return "ssh-mkdir-failed" }
+        "scp-timeout" { return "scp-timeout" }
+        "scp-failed" { return "scp-failed" }
+        "ssh-latest-timeout" { return "ssh-latest-timeout" }
+        "ssh-latest-failed" { return "ssh-latest-failed" }
+        "image-too-large" { return "image-too-large" }
+        "configuration-invalid" { return "configuration-invalid" }
+        "upload-error" { return "upload-error" }
+        default { return "upload-failed" }
+    }
+}
+
+function Set-CpcvUploadStatus {
+    param(
+        [Parameter(Mandatory)][ValidateSet("succeeded", "failed")][string]$Result,
+        [AllowNull()][string]$Reason = ""
+    )
+
+    $cfg = $script:CpcvConfig
+    if (-not $cfg -or $cfg.ConfigError) { return }
+    $path = Get-CpcvUploadStatusFilePath -Config $cfg
+    if ([string]::IsNullOrWhiteSpace($path)) { return }
+
+    try {
+        $value = "{0} result={1}" -f (Get-Date).ToUniversalTime().ToString("o"), $Result
+        if ($Result -eq "failed") {
+            $value += " reason=$(ConvertTo-CpcvUploadStatusReason -Reason $Reason)"
+        }
+        Set-CpcvAtomicText -Path $path -Value $value
+    }
+    catch {
+        # Upload-status is an observability aid.  A local state-write failure
+        # must not hide or replace the real upload result.
+    }
+}
+
+function Update-CpcvUploadStatusFromResult {
+    param([Parameter(Mandatory)]$UploadResult)
+
+    try {
+        $ok = [bool]$UploadResult.Ok
+        $reason = [string]$UploadResult.Reason
+        if ($ok -and $reason -in @("uploaded", "unchanged")) {
+            Set-CpcvUploadStatus -Result "succeeded"
+        }
+        elseif (-not $ok -and $reason -notin @("no-image", "upload-in-progress", "clipboard-changed")) {
+            Set-CpcvUploadStatus -Result "failed" -Reason $reason
+        }
+    }
+    catch {
+        # Keep the uploader's return contract independent of this optional
+        # status surface.
+    }
+}
+
+function Get-CpcvUploadStatusInfo {
+    param([Parameter(Mandatory)][string]$Path)
+
+    try {
+        $content = Get-Content -Raw -LiteralPath $Path -ErrorAction Stop
+        if ($content.Length -gt 512) { return $null }
+        $match = [regex]::Match($content.Trim(), '^(?<timestamp>\d{4}-\d{2}-\d{2}T[^\s]+)\s+result=(?<result>succeeded|failed)(?: reason=(?<reason>[a-z0-9-]{1,64}))?$')
+        if (-not $match.Success) { return $null }
+        [DateTimeOffset]$timestamp = [DateTimeOffset]::MinValue
+        if (-not [DateTimeOffset]::TryParse($match.Groups['timestamp'].Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$timestamp)) { return $null }
+        $result = $match.Groups['result'].Value
+        $reason = $match.Groups['reason'].Value
+        if (($result -eq "failed" -and [string]::IsNullOrWhiteSpace($reason)) -or ($result -eq "succeeded" -and -not [string]::IsNullOrWhiteSpace($reason))) { return $null }
+        return [pscustomobject]@{ Timestamp = $timestamp; Result = $result; Reason = $reason }
     }
     catch { return $null }
 }
@@ -848,7 +952,17 @@ function Publish-ClipboardImage {
     # they never race over local state or publish conflicting latest links.
     $mutex = New-Object System.Threading.Mutex($false, (Get-CpcvMutexName -Purpose "Upload"))
     if (-not $mutex.WaitOne(0, $false)) { return @{ Ok = $false; Reason = "upload-in-progress"; Detail = "Another cpcv upload is active." } }
-    try { return Invoke-CpcvClipboardUpload -CopyPath:$CopyPath -Force:$Force }
+    try {
+        try {
+            $result = Invoke-CpcvClipboardUpload -CopyPath:$CopyPath -Force:$Force
+            Update-CpcvUploadStatusFromResult -UploadResult $result
+            return $result
+        }
+        catch {
+            Set-CpcvUploadStatus -Result "failed" -Reason "upload-error"
+            throw
+        }
+    }
     finally { $mutex.ReleaseMutex() | Out-Null; $mutex.Dispose() }
 }
 
