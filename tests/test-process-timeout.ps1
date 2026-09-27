@@ -89,6 +89,7 @@ try {
         HostAlias = "example-host"; RemoteDir = "clipboard-images"; RemoteHome = "/home/tester"; DataRoot = $tempRoot
         LocalCache = (Join-Path $tempRoot "cache"); StateFile = (Join-Path $tempRoot "last-hash.txt")
         LastRemotePathFile = (Join-Path $tempRoot "last-remote-path.txt"); LogFile = (Join-Path $tempRoot "watch.log")
+        UploadStatusFile = (Join-Path $tempRoot "upload-status.txt")
         HeartbeatFile = (Join-Path $tempRoot "watch.heartbeat"); CommandTimeoutSeconds = 3; MaxCommandOutputBytes = 65536
         PollIntervalSeconds = 2; WatchdogCheckSeconds = 15; WatchdogStaleSeconds = 120
         MaxLogBytes = 1048576; MaxCacheFiles = 200; MaxCacheBytes = 268435456; MaxImageBytes = 52428800; ConfigError = ""
@@ -123,12 +124,17 @@ try {
     Assert-Cpcv ($failedUpload.Reason -eq "ssh-mkdir-failed") "Simulated SSH failure was not reported."
     Assert-Cpcv (-not (Test-Path $script:CpcvConfig.StateFile)) "Failed upload incorrectly advanced the last-upload state."
     Assert-Cpcv ((Get-Content -Raw $script:CpcvConfig.LogFile) -notmatch 'super-secret') "Sensitive proxy/auth text reached the log."
+    $failedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-failed") "A failed upload did not persist a controlled tray status."
+    Assert-Cpcv ((Get-Content -Raw $script:CpcvConfig.UploadStatusFile) -notmatch 'super-secret|example-host|clipboard-images') "Upload status exposed diagnostic or configuration detail."
 
     $script:simulatedNetworkUp = $true
     $recoveredUpload = Publish-ClipboardImage -Force
     Assert-Cpcv ($recoveredUpload.Ok -and $recoveredUpload.Reason -eq "uploaded") "Simulated network recovery did not upload."
     Assert-Cpcv (Test-Path (Join-Path $script:CpcvConfig.LocalCache "latest.png")) "Recovery did not refresh latest.png."
     Assert-Cpcv ((Get-Content -Raw $script:CpcvConfig.StateFile).Length -eq 64) "Recovery did not persist the image hash."
+    $recoveredUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($recoveredUploadStatus -and $recoveredUploadStatus.Result -eq "succeeded") "A recovered upload did not clear the tray failure status."
 }
 finally {
     $script:CpcvConfig = $originalConfig

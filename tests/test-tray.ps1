@@ -210,6 +210,7 @@ if ((Get-CpcvConfig).HostAlias -ne 'session-host') { throw 'Runtime configuratio
         HostAlias = "example-host"; RemoteDir = "clipboard-images"; RemoteHome = "/home/tester"; DataRoot = $tempRoot
         LocalCache = (Join-Path $tempRoot "cache"); StateFile = (Join-Path $tempRoot "last-hash.txt")
         LastRemotePathFile = (Join-Path $tempRoot "last-remote-path.txt"); LogFile = (Join-Path $tempRoot "watch.log")
+        UploadStatusFile = (Join-Path $tempRoot "upload-status.txt")
         HeartbeatFile = (Join-Path $tempRoot "watch.heartbeat"); CommandTimeoutSeconds = 35; MaxCommandOutputBytes = 65536
         PollIntervalSeconds = 2; WatchdogCheckSeconds = 15; WatchdogStaleSeconds = 120
         MaxLogBytes = 1048576; MaxCacheFiles = 200; MaxCacheBytes = 268435456; MaxImageBytes = 52428800; ConfigError = ""
@@ -255,6 +256,28 @@ if ((Get-CpcvConfig).HostAlias -ne 'session-host') { throw 'Runtime configuratio
     Assert-CpcvTray ($tooltip.Length -le 63) "NotifyIcon tooltip exceeded its Windows length limit."
     Assert-CpcvTray ($tooltip -match 'uploaded') "Healthy tray tooltip did not report the latest successful upload."
     Assert-CpcvTray ($tooltip -notmatch "example-host|clipboard-images") "NotifyIcon tooltip exposed local configuration/path details."
+
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=failed reason=ssh-mkdir-timeout" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $uploadFailure = Get-CpcvTrayState
+    Assert-CpcvTray ($uploadFailure.Level -eq "Warning" -and $uploadFailure.IssueKind -eq "Upload") "A persisted upload failure was not surfaced as an upload-specific warning."
+    Assert-CpcvTray ($uploadFailure.Summary -match "SSH connection timed out") "A background SSH timeout did not receive a clear summary."
+    Assert-CpcvTray ($uploadFailure.Detail -match "terminal SSH session can still work") "The tray did not explain the difference between a fresh background SSH attempt and an interactive terminal session."
+    Assert-CpcvTray ((Get-CpcvTrayGuidance -State $uploadFailure) -match "Retry clipboard upload") "An upload warning did not offer the direct retry action."
+    $failureTooltip = Get-CpcvTrayTooltip -State $uploadFailure
+    Assert-CpcvTray ($failureTooltip.Length -le 63 -and $failureTooltip -notmatch "example-host|clipboard-images") "Upload-failure tooltip was not bounded and private."
+
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $recovered = Get-CpcvTrayState
+    Assert-CpcvTray ($recovered.Level -eq "Healthy" -and $recovered.IssueKind -eq "") "A confirmed successful upload did not clear the upload warning."
+
+    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $legacyRetry = Get-CpcvTrayState
+    Assert-CpcvTray ($legacyRetry.Level -eq "Warning" -and $legacyRetry.IssueKind -eq "Upload" -and $legacyRetry.UploadFailureCount -eq 2) "A retrying legacy watcher heartbeat did not fail visibly."
+
+    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f (Get-Date).ToUniversalTime().AddSeconds(-2).ToString("o"))
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $manualRecovery = Get-CpcvTrayState
+    Assert-CpcvTray ($manualRecovery.Level -eq "Healthy" -and $manualRecovery.UploadFailureCount -eq 0) "A newer confirmed manual retry did not clear an older watcher retry warning."
 
     Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=0" -f (Get-Date).ToUniversalTime().AddSeconds(-121).ToString("o"))
     $stale = Get-CpcvTrayState

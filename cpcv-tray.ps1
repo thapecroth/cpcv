@@ -85,6 +85,85 @@ function Get-CpcvTrayLatestPath {
     return ""
 }
 
+function Get-CpcvTrayUploadIssue {
+    param(
+        [ValidateRange(0, [int]::MaxValue)][int]$FailureCount = 0,
+        [AllowNull()][string]$FailureReason = ""
+    )
+
+    # FailureReason comes from the core-owned, token-only upload status file.
+    # Do not render raw subprocess output in any tray-facing surface.
+    $retryDetail = "cpcv will retry automatically when it sees an image in the clipboard."
+    $countDetail = if ($FailureCount -gt 1) { " $FailureCount attempts have failed." } elseif ($FailureCount -eq 1) { " One attempt has failed." } else { "" }
+    switch ($FailureReason) {
+        "ssh-mkdir-timeout" {
+            return [pscustomobject]@{
+                Summary = "Background SSH connection timed out"
+                Detail = "cpcv could not start the remote upload before its timeout. A terminal SSH session can still work; $retryDetail$countDetail"
+            }
+        }
+        "ssh-mkdir-failed" {
+            return [pscustomobject]@{
+                Summary = "Background SSH connection failed"
+                Detail = "cpcv could not start the remote upload. $retryDetail$countDetail"
+            }
+        }
+        "scp-timeout" {
+            return [pscustomobject]@{
+                Summary = "Image transfer timed out"
+                Detail = "cpcv could not finish transferring the clipboard image before its timeout. $retryDetail$countDetail"
+            }
+        }
+        "scp-failed" {
+            return [pscustomobject]@{
+                Summary = "Image transfer failed"
+                Detail = "cpcv could not transfer the clipboard image. $retryDetail$countDetail"
+            }
+        }
+        "ssh-latest-timeout" {
+            return [pscustomobject]@{
+                Summary = "Upload finalization timed out"
+                Detail = "The image may have transferred, but cpcv could not confirm latest.png. $retryDetail$countDetail"
+            }
+        }
+        "ssh-latest-failed" {
+            return [pscustomobject]@{
+                Summary = "Upload finalization failed"
+                Detail = "The image may have transferred, but cpcv could not confirm latest.png. $retryDetail$countDetail"
+            }
+        }
+        "image-too-large" {
+            return [pscustomobject]@{
+                Summary = "Clipboard image is too large"
+                Detail = "The image exceeded cpcv's configured size limit. Open Settings to increase MaxImageBytes or copy a smaller image."
+            }
+        }
+        default {
+            return [pscustomobject]@{
+                Summary = "Upload needs retry"
+                Detail = "The last clipboard image upload was not confirmed. $retryDetail$countDetail View recent activity for a redacted diagnostic."
+            }
+        }
+    }
+}
+
+function Test-CpcvTrayUploadIssue {
+    param([Parameter(Mandatory)]$State)
+    return ([string]$State.IssueKind -eq "Upload")
+}
+
+function Get-CpcvTrayHeartbeatText {
+    param([AllowNull()]$Heartbeat)
+
+    if ($null -eq $Heartbeat) { return "No valid health record" }
+    [int]$failureCount = 0
+    try { $failureCount = [int]$Heartbeat.FailureCount } catch { }
+    if ($failureCount -gt 1) { return "Retrying after $failureCount failed attempts" }
+    if ($failureCount -eq 1) { return "Retrying after one failed attempt" }
+    if ($Heartbeat.Status -eq "checking") { return "Watcher: checking clipboard" }
+    return "Watcher: idle"
+}
+
 function Get-CpcvTrayState {
     # cpcv-core.ps1 owns its script-scoped cached configuration. Calling
     # its public loader avoids depending on a caller's dot-sourcing scope.
@@ -104,14 +183,43 @@ function Get-CpcvTrayState {
             $heartbeatAgeSeconds = [Math]::Max(0, ((Get-Date).ToUniversalTime() - $heartbeatInfo.Timestamp.UtcDateTime).TotalSeconds)
         }
     }
+    [int]$heartbeatFailureCount = 0
+    if ($heartbeatInfo) {
+        try { $heartbeatFailureCount = [int]$heartbeatInfo.FailureCount } catch { }
+    }
+
+    $uploadStatus = $null
+    $uploadStatusPath = Get-CpcvUploadStatusFilePath -Config $cfg
+    if (-not [string]::IsNullOrWhiteSpace($uploadStatusPath) -and (Test-Path -LiteralPath $uploadStatusPath)) {
+        $uploadStatus = Get-CpcvUploadStatusInfo -Path $uploadStatusPath
+    }
+    $uploadIssue = $null
+    $uploadFailureReason = ""
+    # A tray-triggered one-shot retry shares the core upload path but not the
+    # watcher's in-memory backoff counter. A newer confirmed success should
+    # clear an older retry count immediately rather than leaving a yellow badge
+    # in place until the watcher wakes up again.
+    $confirmedUploadSupersedesHeartbeat = ($uploadStatus -and $uploadStatus.Result -eq "succeeded" -and
+        ((-not $heartbeatInfo) -or $uploadStatus.Timestamp -ge $heartbeatInfo.Timestamp))
+    $effectiveHeartbeatFailureCount = if ($confirmedUploadSupersedesHeartbeat) { 0 } else { $heartbeatFailureCount }
+    if ($effectiveHeartbeatFailureCount -gt 0) {
+        if ($uploadStatus -and $uploadStatus.Result -eq "failed") { $uploadFailureReason = $uploadStatus.Reason }
+        $uploadIssue = Get-CpcvTrayUploadIssue -FailureCount $effectiveHeartbeatFailureCount -FailureReason $uploadFailureReason
+    }
+    elseif ($uploadStatus -and $uploadStatus.Result -eq "failed") {
+        $uploadFailureReason = $uploadStatus.Reason
+        $uploadIssue = Get-CpcvTrayUploadIssue -FailureReason $uploadFailureReason
+    }
 
     $level = "Unknown"
     $summary = "Status is still loading"
     $detail = ""
+    $issueKind = ""
     if ($cfg.ConfigError) {
         $level = "Error"
         $summary = "Configuration needs attention"
         $detail = $cfg.ConfigError
+        $issueKind = "Configuration"
     }
     elseif (-not $guardianProbe.Available -or -not $watchProbe.Available) {
         $level = "Unknown"
@@ -122,36 +230,49 @@ function Get-CpcvTrayState {
         $level = "Warning"
         $summary = "Duplicate cpcv process detected"
         $detail = "Use Restart service to stop only this checkout's duplicate processes."
+        $issueKind = "Service"
     }
     elseif ($guardians.Count -eq 0 -and $watchers.Count -eq 0) {
         $level = "Stopped"
         $summary = "The cpcv service is stopped"
         $detail = "Start service to launch the guardian."
+        $issueKind = "Service"
     }
     elseif ($guardians.Count -eq 0) {
         $level = "Warning"
         $summary = "Watcher is running without its guardian"
         $detail = "Restart service to restore watchdog protection."
+        $issueKind = "Service"
     }
     elseif ($watchers.Count -eq 0) {
         $level = "Warning"
         $summary = "Guardian is waiting for the watcher"
         $detail = "The guardian should start it shortly; Restart service is safe if it does not."
+        $issueKind = "Service"
     }
     elseif (-not $heartbeatInfo) {
         $level = "Warning"
         $summary = "Watcher heartbeat is missing or invalid"
         $detail = "The guardian should recover it."
+        $issueKind = "Service"
     }
     elseif ($heartbeatInfo.ProcessId -ne [int]$watchers[0].ProcessId) {
         $level = "Warning"
         $summary = "Watcher heartbeat belongs to another process"
         $detail = "The guardian should recover it."
+        $issueKind = "Service"
     }
     elseif ($heartbeatAgeSeconds -gt [double]$cfg.WatchdogStaleSeconds) {
         $level = "Warning"
         $summary = "Watcher heartbeat is stale"
         $detail = "The guardian should recover it; Restart service is safe if it persists."
+        $issueKind = "Service"
+    }
+    elseif ($uploadIssue) {
+        $level = "Warning"
+        $summary = $uploadIssue.Summary
+        $detail = $uploadIssue.Detail
+        $issueKind = "Upload"
     }
     else {
         $level = "Healthy"
@@ -187,6 +308,10 @@ function Get-CpcvTrayState {
         WatcherProbeAvailable = $watchProbe.Available
         Heartbeat = $heartbeatInfo
         HeartbeatAgeSeconds = $heartbeatAgeSeconds
+        UploadStatus = $uploadStatus
+        IssueKind = $issueKind
+        UploadFailureCount = $effectiveHeartbeatFailureCount
+        UploadFailureReason = $uploadFailureReason
         LatestPath = $latestPath
         LatestUploadAt = $latestUploadAt
         LatestUploadAgeSeconds = $latestUploadAgeSeconds
@@ -270,7 +395,12 @@ function Get-CpcvTrayGuidance {
         "Healthy" { return "Take screenshots as usual. cpcv will upload new clipboard images automatically." }
         "Stopped" { return "Start automatic uploads to resume watching the image clipboard." }
         "Error" { return "Open settings, correct the local configuration, then start the service." }
-        "Warning" { return "Use Repair service if this does not clear after the next health check." }
+        "Warning" {
+            if (Test-CpcvTrayUploadIssue -State $State) {
+                return "cpcv will retry automatically when it sees an image. Use Retry clipboard upload to try now or View activity for details."
+            }
+            return "Use Repair service if this does not clear after the next health check."
+        }
         default { return "Refresh status after local process inspection becomes available." }
     }
 }
@@ -490,6 +620,136 @@ function Get-CpcvTrayIcon {
         # reliable, dependency-free fallback.
         return (& $fallbackResult "unreadable")
     }
+}
+
+function Initialize-CpcvTrayNativeIconInterop {
+    if ($null -ne ("Cpcv.Tray.NativeIconInterop" -as [type])) { return $true }
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace Cpcv.Tray {
+    public static class NativeIconInterop {
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool DestroyIcon(IntPtr hIcon);
+    }
+}
+'@ -ErrorAction Stop
+    }
+    catch { }
+    return ($null -ne ("Cpcv.Tray.NativeIconInterop" -as [type]))
+}
+
+function New-CpcvTrayStatusIcon {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Drawing.Icon]$BaseIcon,
+        [Parameter(Mandatory)][ValidateSet("Warning", "Error", "Stopped", "Unknown")][string]$Level
+    )
+
+    # NotifyIcon has no badge API. Compose a small, owned status variant from
+    # the checked-in base icon, then clone it before releasing the native HICON.
+    # The returned clone stays alive in the tray's per-level cache.
+    $bitmap = $null
+    $graphics = $null
+    $badgeBrush = $null
+    $outlinePen = $null
+    $symbolPen = $null
+    $symbolBrush = $null
+    $symbolFont = $null
+    $symbolFormat = $null
+    $handleIcon = $null
+    $createdIcon = $null
+    [IntPtr]$nativeIconHandle = [IntPtr]::Zero
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        if (-not (Initialize-CpcvTrayNativeIconInterop)) { return $null }
+
+        $sourceSize = [Math]::Max($BaseIcon.Width, $BaseIcon.Height)
+        [int]$canvasSize = [Math]::Min(64, [Math]::Max(32, [int]$sourceSize))
+        $bitmap = [System.Drawing.Bitmap]::new($canvasSize, $canvasSize, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.DrawIcon($BaseIcon, (New-Object System.Drawing.Rectangle -ArgumentList @(0, 0, $canvasSize, $canvasSize)))
+
+        $style = Get-CpcvTrayStatusStyle -Level $Level
+        [int]$badgeDiameter = [Math]::Min(28, [Math]::Max(14, [int][Math]::Round($canvasSize * 0.48)))
+        [int]$badgeMargin = [Math]::Max(1, [int][Math]::Round($canvasSize * 0.03))
+        [int]$badgeLeft = $canvasSize - $badgeDiameter - $badgeMargin
+        [int]$badgeTop = $canvasSize - $badgeDiameter - $badgeMargin
+        $badgeRect = New-Object System.Drawing.RectangleF -ArgumentList @([single]$badgeLeft, [single]$badgeTop, [single]$badgeDiameter, [single]$badgeDiameter)
+        $badgeBrush = [System.Drawing.SolidBrush]::new((Get-CpcvTrayColor $style.Accent))
+        $symbolBrush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+        $outlinePen = [System.Drawing.Pen]::new([System.Drawing.Color]::White, [Math]::Max(1.5, $canvasSize * 0.055))
+        $graphics.FillEllipse($badgeBrush, $badgeRect)
+        $graphics.DrawEllipse($outlinePen, $badgeRect)
+
+        if ($Level -in @("Warning", "Error", "Stopped")) {
+            $symbolPen = [System.Drawing.Pen]::new([System.Drawing.Color]::White, [Math]::Max(2.0, $canvasSize * 0.08))
+            $symbolPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+            $symbolPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+            [single]$centerX = $badgeLeft + ($badgeDiameter / 2.0)
+            [single]$centerY = $badgeTop + ($badgeDiameter / 2.0)
+            if ($Level -eq "Stopped") {
+                $graphics.DrawLine($symbolPen, $badgeLeft + ($badgeDiameter * 0.30), $centerY, $badgeLeft + ($badgeDiameter * 0.70), $centerY)
+            }
+            else {
+                $graphics.DrawLine($symbolPen, $centerX, $badgeTop + ($badgeDiameter * 0.27), $centerX, $badgeTop + ($badgeDiameter * 0.58))
+                [single]$dotDiameter = [Math]::Max(2.5, $badgeDiameter * 0.13)
+                $graphics.FillEllipse($symbolBrush, $centerX - ($dotDiameter / 2), $badgeTop + ($badgeDiameter * 0.71), $dotDiameter, $dotDiameter)
+            }
+        }
+        else {
+            $symbolFont = [System.Drawing.Font]::new("Segoe UI", [single]($badgeDiameter * 0.68), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+            $symbolFormat = [System.Drawing.StringFormat]::new()
+            $symbolFormat.Alignment = [System.Drawing.StringAlignment]::Center
+            $symbolFormat.LineAlignment = [System.Drawing.StringAlignment]::Center
+            $graphics.DrawString("?", $symbolFont, $symbolBrush, $badgeRect, $symbolFormat)
+        }
+
+        $nativeIconHandle = $bitmap.GetHicon()
+        $handleIcon = [System.Drawing.Icon]::FromHandle($nativeIconHandle)
+        $createdIcon = [System.Drawing.Icon]$handleIcon.Clone()
+        return $createdIcon
+    }
+    catch {
+        if ($createdIcon) { $createdIcon.Dispose() }
+        return $null
+    }
+    finally {
+        if ($handleIcon) { $handleIcon.Dispose() }
+        if ($nativeIconHandle -ne [IntPtr]::Zero) { [void][Cpcv.Tray.NativeIconInterop]::DestroyIcon($nativeIconHandle) }
+        if ($symbolFormat) { $symbolFormat.Dispose() }
+        if ($symbolFont) { $symbolFont.Dispose() }
+        if ($symbolPen) { $symbolPen.Dispose() }
+        if ($outlinePen) { $outlinePen.Dispose() }
+        if ($symbolBrush) { $symbolBrush.Dispose() }
+        if ($badgeBrush) { $badgeBrush.Dispose() }
+        if ($graphics) { $graphics.Dispose() }
+        if ($bitmap) { $bitmap.Dispose() }
+    }
+}
+
+function Get-CpcvTrayStatusIcon {
+    param(
+        [Parameter(Mandatory)][System.Drawing.Icon]$BaseIcon,
+        [Parameter(Mandatory)][string]$Level,
+        [Parameter(Mandatory)][hashtable]$Cache
+    )
+
+    if ($Level -eq "Healthy") { return $BaseIcon }
+    $cacheKey = if ($Level -in @("Warning", "Error", "Stopped", "Unknown")) { $Level } else { "Unknown" }
+    if ($Cache.ContainsKey($cacheKey)) { return $Cache[$cacheKey] }
+    $icon = New-CpcvTrayStatusIcon -BaseIcon $BaseIcon -Level $cacheKey
+    if ($icon) {
+        $Cache[$cacheKey] = $icon
+        return $icon
+    }
+    # The text/status surfaces still report the condition if Windows cannot
+    # compose a cosmetic badge on this machine.
+    return $BaseIcon
 }
 
 function Start-CpcvTrayGuardian {
@@ -1921,15 +2181,28 @@ function Show-CpcvTrayStatusWindow {
         $serviceCard.Value.ForeColor = Get-CpcvTrayColor $style.Foreground
         $serviceCard.Detail.Text = "$guardianCount guardian; $watcherCount watcher"
         $heartbeatCard.Value.Text = Get-CpcvTrayRelativeTimeText -AgeSeconds $CurrentState.HeartbeatAgeSeconds
-        $heartbeatCard.Detail.Text = if ($CurrentState.Heartbeat) { "Watcher: $($CurrentState.Heartbeat.Status)" } else { "No valid health record" }
+        $heartbeatCard.Detail.Text = Get-CpcvTrayHeartbeatText -Heartbeat $CurrentState.Heartbeat
         $hasLatestPath = (-not [string]::IsNullOrWhiteSpace($CurrentState.LatestPath) -and (Test-CpcvRemotePath $CurrentState.LatestPath))
         $latestCard.Value.Text = Get-CpcvTrayLatestUploadText -State $CurrentState
         $latestCard.Detail.Text = if ($hasLatestPath) { "Latest path is available locally" } else { "Upload an image to create one" }
 
+        $hasUploadIssue = Test-CpcvTrayUploadIssue -State $CurrentState
         $uploadButton.Enabled = $CurrentState.Level -ne "Error"
+        $uploadButton.Text = if ($hasUploadIssue) { "Retry clipboard upload" } else { "Upload clipboard image" }
         $copyButton.Enabled = $hasLatestPath
         $copyButton.Text = if ($hasLatestPath) { "Copy latest path" } else { "No upload path yet" }
-        $serviceButton.Text = if (-not $serviceRunning) { "Start automatic uploads" } elseif ($CurrentState.Level -in @("Warning", "Unknown")) { "Repair service" } else { "Restart service" }
+        $serviceButton.Text = if (-not $serviceRunning) {
+            "Start automatic uploads"
+        }
+        elseif ($hasUploadIssue) {
+            "Restart service"
+        }
+        elseif ($CurrentState.Level -in @("Warning", "Unknown")) {
+            "Repair service"
+        }
+        else {
+            "Restart service"
+        }
         $serviceButton.Enabled = ($CurrentState.Level -ne "Error" -and $CurrentState.GuardianProbeAvailable -and ((-not $serviceRunning) -or $CurrentState.WatcherProbeAvailable))
         $actionFeedback.Text = Get-CpcvTrayGuidance -State $CurrentState
         $form.Text = "cpcv status - $($style.Badge)"
@@ -2010,9 +2283,11 @@ function Start-CpcvTrayApplication {
     $notify = $null
     $timer = $null
     $trayIconSelection = $null
+    $trayStatusIcons = @{}
     try {
         $script:CpcvTrayState = Get-CpcvTrayState
         $script:CpcvTrayLastLevel = ""
+        $script:CpcvTrayLastIconLevel = "Healthy"
         $menu = New-Object System.Windows.Forms.ContextMenuStrip
         $statusItem = $menu.Items.Add("Loading status...")
         $statusItem.Enabled = $false
@@ -2052,16 +2327,27 @@ function Start-CpcvTrayApplication {
             else {
                 "Status: $($state.Level) - $($state.Summary)"
             }
+            if ($script:CpcvTrayLastIconLevel -ne $state.Level) {
+                $notify.Icon = Get-CpcvTrayStatusIcon -BaseIcon $trayIconSelection.Icon -Level $state.Level -Cache $trayStatusIcons
+                $script:CpcvTrayLastIconLevel = $state.Level
+            }
             $notify.Text = Get-CpcvTrayTooltip -State $state
             $isRunning = ((@($state.Guardians)).Count -gt 0 -or (@($state.Watchers)).Count -gt 0)
             $startItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and -not $isRunning)
             $stopItem.Enabled = ($state.GuardianProbeAvailable -and $state.WatcherProbeAvailable -and $isRunning)
             $restartItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and $state.WatcherProbeAvailable)
             $copyItem.Enabled = (-not [string]::IsNullOrWhiteSpace($state.LatestPath) -and (Test-CpcvRemotePath $state.LatestPath))
-            if ($script:CpcvTrayLastLevel -and $script:CpcvTrayLastLevel -ne $state.Level -and $state.Level -in @("Warning", "Error")) {
-                $notify.BalloonTipTitle = "cpcv: $($state.Level)"
-                $notify.BalloonTipText = $state.Summary
-                $notify.ShowBalloonTip(3000)
+            if ($script:CpcvTrayLastLevel -and $script:CpcvTrayLastLevel -ne $state.Level) {
+                if ($state.Level -in @("Warning", "Error")) {
+                    $notify.BalloonTipTitle = "cpcv: $($state.Level)"
+                    $notify.BalloonTipText = $state.Summary
+                    $notify.ShowBalloonTip(3000)
+                }
+                elseif ($state.Level -eq "Healthy" -and $script:CpcvTrayLastLevel -in @("Warning", "Error")) {
+                    $notify.BalloonTipTitle = "cpcv: Healthy"
+                    $notify.BalloonTipText = "Uploads are working again."
+                    $notify.ShowBalloonTip(2000)
+                }
             }
             $script:CpcvTrayLastLevel = $state.Level
         }
@@ -2089,6 +2375,9 @@ function Start-CpcvTrayApplication {
     finally {
         if ($timer) { $timer.Stop(); $timer.Dispose() }
         if ($notify) { $notify.Visible = $false; $notify.Dispose() }
+        foreach ($statusIcon in @($trayStatusIcons.Values)) {
+            if ($statusIcon) { $statusIcon.Dispose() }
+        }
         if ($trayIconSelection -and $trayIconSelection.OwnsIcon -and $trayIconSelection.Icon) { $trayIconSelection.Icon.Dispose() }
         $mutex.ReleaseMutex() | Out-Null
         $mutex.Dispose()

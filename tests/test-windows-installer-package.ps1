@@ -85,7 +85,8 @@ foreach ($required in @(
     'Test-CpcvExecutableHeader',
     'cpcv-windows/cpcv-remote.ps1',
     'show", "HEAD:VERSION',
-    'CpcvOutputBaseName'
+    'CpcvOutputBaseName',
+    'upload-status\.txt'
 )) {
     Assert-CpcvInstallerPackage ($build.Contains($required)) "Windows build script is missing installer packaging behavior: $required"
 }

@@ -191,7 +191,7 @@ try {
     $forbidden = @($names | Where-Object {
         $_ -match '(^|/)\.git(/|$)' -or
         $_ -match '(^|/)cache(/|$)' -or
-        $_ -match '(^|/)(last-hash\.txt|last-remote-path\.txt|watch\.heartbeat)$' -or
+        $_ -match '(^|/)(last-hash\.txt|last-remote-path\.txt|upload-status\.txt|watch\.heartbeat)$' -or
         $_ -match '(^|/)(cpcv\.config|config)\.psd1$' -or
         $_ -match '\.log(?:\.\d+)?$'
     })
