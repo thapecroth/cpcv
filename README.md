@@ -327,10 +327,14 @@ reporting process.
 
 ## Update, remove, or go deeper
 
-To update Windows, run the newer Setup EXE; it keeps private configuration and
-data by default. For a portable ZIP, extract the new release and rerun its
-installers. To update Homebrew, run `brew upgrade thapecroth/cpcv/cpcv` followed
-by `cpcv-setup`; redeploy the tmux helper after its source changes.
+To update Windows, right-click the cpcv tray icon and choose **Get latest
+version…**. It shows the installed version and opens only cpcv's official
+GitHub Releases page; it does not silently download or run software. Verify the
+newer Setup EXE against `SHA256SUMS.txt`, then run it. Setup keeps private
+configuration and data by default. For a portable ZIP, extract the new release
+and rerun its installers. To update Homebrew, run `brew upgrade
+thapecroth/cpcv/cpcv` followed by `cpcv-setup`; redeploy the tmux helper after
+its source changes.
 
 To remove the Windows setup installation while preserving private settings and
 images, use **Installed apps** in Windows. For portable installs, preview

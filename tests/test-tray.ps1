@@ -13,6 +13,27 @@ Add-Type -AssemblyName System.Drawing
 $traySource = Get-Content -LiteralPath (Join-Path $root "cpcv-tray.ps1") -Raw
 Assert-CpcvTray ($traySource.Contains('$showStatusItem = $menu.Items.Add("View status...")')) "Tray menu no longer exposes a discoverable status action."
 Assert-CpcvTray ($traySource.Contains('$exitItem = $menu.Items.Add("Exit tray (service stays running)")')) "Tray exit label no longer explains that the uploader remains active."
+Assert-CpcvTray ($traySource.Contains('$script:CpcvTrayReleaseUrl = "https://github.com/thapecroth/cpcv/releases/latest"')) "Tray update action no longer uses the hard-coded official Releases URL."
+Assert-CpcvTray ($traySource.Contains('function Get-CpcvTrayInstalledVersion')) "Tray no longer reads a bounded installed-version display value."
+Assert-CpcvTray ($traySource.Contains('function Get-CpcvTrayUpdateMenuText')) "Tray no longer handles unavailable installed versions safely in its update label."
+Assert-CpcvTray ($traySource.Contains('cpcvTrayUpdateButton')) "Status dashboard no longer exposes the explicit update action."
+Assert-CpcvTray ($traySource.Contains('$updateItem = $menu.Items.Add((Get-CpcvTrayUpdateMenuText -InstalledVersion $installedVersion))')) "Tray menu no longer labels the installed version beside the update action."
+Assert-CpcvTray ($traySource -match '(?s)\$updateButton\.Add_Click\(\{.*?Open-CpcvTrayReleasePage') "Status dashboard update action is not wired to the official release-page handoff."
+Assert-CpcvTray ($traySource -match '(?s)\$updateItem\.Add_Click\(\{.*?Open-CpcvTrayReleasePage') "Tray menu update action is not wired to the official release-page handoff."
+Assert-CpcvTray (-not ($traySource -match '(?i)\b(?:invoke-webrequest|invoke-restmethod|start-bitstransfer)\b')) "Tray update UX must not silently download an installer."
+$script:releasePageLaunch = $null
+function Start-Process {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$FilePath)
+    $script:releasePageLaunch = $FilePath
+}
+try {
+    Open-CpcvTrayReleasePage
+}
+finally {
+    Remove-Item Function:\Start-Process -ErrorAction SilentlyContinue
+}
+Assert-CpcvTray ($script:releasePageLaunch -eq 'https://github.com/thapecroth/cpcv/releases/latest') "Tray update action did not hand the exact official Releases URL to the browser."
 Assert-CpcvTray ($traySource.Contains('Upload clipboard image')) "Status window no longer exposes its one-shot upload action."
 Assert-CpcvTray ($traySource.Contains('Quick actions')) "Status window no longer has a clear quick-actions section."
 Assert-CpcvTray ($traySource.Contains('Refresh status')) "Status window no longer exposes an explicit refresh action."
@@ -112,6 +133,15 @@ finally {
 $tempRoot = Join-Path $env:TEMP ("cpcv-tray-test-{0}" -f [Guid]::NewGuid())
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 try {
+    $validVersionFile = Join-Path $tempRoot 'VERSION'
+    [IO.File]::WriteAllText($validVersionFile, "1.2.3-beta.1+build.5`n", [Text.UTF8Encoding]::new($false))
+    Assert-CpcvTray ((Get-CpcvTrayInstalledVersion -VersionFile $validVersionFile) -eq '1.2.3-beta.1+build.5') "Tray did not read a valid bundled SemVer version."
+    $invalidVersionFile = Join-Path $tempRoot 'invalid-VERSION'
+    [IO.File]::WriteAllText($invalidVersionFile, "version=secret`n", [Text.UTF8Encoding]::new($false))
+    Assert-CpcvTray ((Get-CpcvTrayInstalledVersion -VersionFile $invalidVersionFile) -eq 'unknown') "Tray displayed malformed VERSION content."
+    Assert-CpcvTray ((Get-CpcvTrayUpdateMenuText -InstalledVersion '1.2.3-beta.1') -eq 'Get latest version... (v1.2.3-beta.1)') "Tray update label did not include a valid installed version."
+    Assert-CpcvTray ((Get-CpcvTrayUpdateMenuText -InstalledVersion 'unknown') -eq 'Get latest version... (version unavailable)') "Tray update label displayed an unavailable installed version unsafely."
+
     # Exercise the Settings persistence boundary in a fresh process so its
     # module-level CPCV_CONFIG selection cannot touch a real customer file.
     # The tray UI itself stubs these helpers in the STA probe below; this test
@@ -266,16 +296,21 @@ if ((Get-CpcvConfig).HostAlias -ne 'session-host') { throw 'Runtime configuratio
     $failureTooltip = Get-CpcvTrayTooltip -State $uploadFailure
     Assert-CpcvTray ($failureTooltip.Length -le 63 -and $failureTooltip -notmatch "example-host|clipboard-images") "Upload-failure tooltip was not bounded and private."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f (Get-Date).ToUniversalTime().ToString("o"))
+    # Make state ordering explicit rather than relying on clock resolution: a
+    # newer watcher retry must supersede an older confirmed one-shot upload,
+    # while a later confirmed upload must clear that retry warning.
+    $confirmedUploadAt = (Get-Date).ToUniversalTime().AddSeconds(-10)
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f $confirmedUploadAt.ToString("o"))
     $recovered = Get-CpcvTrayState
     Assert-CpcvTray ($recovered.Level -eq "Healthy" -and $recovered.IssueKind -eq "") "A confirmed successful upload did not clear the upload warning."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $retryHeartbeatAt = $confirmedUploadAt.AddSeconds(5)
+    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f $retryHeartbeatAt.ToString("o"))
     $legacyRetry = Get-CpcvTrayState
     Assert-CpcvTray ($legacyRetry.Level -eq "Warning" -and $legacyRetry.IssueKind -eq "Upload" -and $legacyRetry.UploadFailureCount -eq 2) "A retrying legacy watcher heartbeat did not fail visibly."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f (Get-Date).ToUniversalTime().AddSeconds(-2).ToString("o"))
-    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f (Get-Date).ToUniversalTime().ToString("o"))
+    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f $retryHeartbeatAt.AddSeconds(-2).ToString("o"))
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f $retryHeartbeatAt.AddSeconds(1).ToString("o"))
     $manualRecovery = Get-CpcvTrayState
     Assert-CpcvTray ($manualRecovery.Level -eq "Healthy" -and $manualRecovery.UploadFailureCount -eq 0) "A newer confirmed manual retry did not clear an older watcher retry warning."
 

@@ -19,13 +19,14 @@ $script:trayUiAction = ''
 function Start-CpcvTrayUpload { $script:trayUiAction = 'upload' }
 function Start-CpcvTrayGuardian { $script:trayUiAction = 'start'; return $true }
 function Restart-CpcvTrayService { $script:trayUiAction = 'restart' }
+function Open-CpcvTrayReleasePage { $script:trayUiAction = 'update' }
 function Show-CpcvTrayError { param([string]$Message) throw "Unexpected tray UI error: $Message" }
 function Get-CpcvTrayState { return $script:trayUiCurrentState }
 
 function Invoke-CpcvTrayDialogProbe {
     param(
         [Parameter(Mandatory)]$State,
-        [Parameter(Mandatory)][ValidateSet('upload', 'start', 'close')][string]$Action,
+        [Parameter(Mandatory)][ValidateSet('upload', 'update', 'start', 'close')][string]$Action,
         [switch]$ExpectUploadDisabled,
         [string]$ExpectedUploadText = '',
         [string]$ExpectedServiceText = ''
@@ -55,10 +56,14 @@ function Invoke-CpcvTrayDialogProbe {
             $script:trayUiProbeCompleted = $true
             $upload = @($form.Controls.Find('cpcvTrayUploadButton', $true)) | Select-Object -First 1
             $service = @($form.Controls.Find('cpcvTrayServiceButton', $true)) | Select-Object -First 1
+            $update = @($form.Controls.Find('cpcvTrayUpdateButton', $true)) | Select-Object -First 1
+            $subtitle = @($form.Controls.Find('cpcvTraySubtitle', $true)) | Select-Object -First 1
             $banner = @($form.Controls.Find('cpcvTrayStatusBanner', $true)) | Select-Object -First 1
             $logo = @($form.Controls.Find('cpcvTrayBrandLogo', $true)) | Select-Object -First 1
             Assert-CpcvTrayUi ($null -ne $upload) 'Status dashboard did not construct the one-shot upload button.'
             Assert-CpcvTrayUi ($null -ne $service) 'Status dashboard did not construct the service action button.'
+            Assert-CpcvTrayUi ($null -ne $update -and $update.Text -eq 'Get latest version...') 'Status dashboard did not construct its explicit update action.'
+            Assert-CpcvTrayUi ($null -ne $subtitle -and $subtitle.Text -match 'Installed v[0-9]+\.[0-9]+\.[0-9]+') 'Status dashboard did not show the installed cpcv version.'
             Assert-CpcvTrayUi ($null -ne $banner) 'Status dashboard did not construct its health banner.'
             Assert-CpcvTrayUi ($null -ne $logo -and $null -ne $logo.Image) 'Status dashboard did not construct the branded logo.'
             if ($ExpectedUploadText) { Assert-CpcvTrayUi ($upload.Text -eq $ExpectedUploadText) "Status dashboard upload action was '$($upload.Text)', not '$ExpectedUploadText'." }
@@ -70,6 +75,7 @@ function Invoke-CpcvTrayDialogProbe {
             Assert-CpcvTrayUi $upload.Enabled 'Non-error dashboard unexpectedly disabled one-shot upload.'
             switch ($Action) {
                 'upload' { $upload.PerformClick() }
+                'update' { $update.PerformClick() }
                 'start' { $service.PerformClick() }
             }
         }
@@ -113,6 +119,9 @@ $baseState = [pscustomobject]@{
 
 Invoke-CpcvTrayDialogProbe -State $baseState -Action upload
 Assert-CpcvTrayUi ($script:trayUiAction -eq 'upload') 'Upload button did not invoke its protected action handler.'
+
+Invoke-CpcvTrayDialogProbe -State $baseState -Action update
+Assert-CpcvTrayUi ($script:trayUiAction -eq 'update') 'Dashboard update action did not invoke the official release-page handoff.'
 
 $retryState = $baseState.PSObject.Copy()
 $retryState.Level = 'Warning'

@@ -23,6 +23,11 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "cpcv-core.ps1")
 . (Join-Path $PSScriptRoot "cpcv-remote.ps1")
 
+# This deliberately stays a fixed first-party URL.  The tray can help a
+# person find a release, but it never fetches, verifies, or starts an update
+# on its own.
+$script:CpcvTrayReleaseUrl = "https://github.com/thapecroth/cpcv/releases/latest"
+
 function Get-CpcvTrayProcessProbe {
     param([Parameter(Mandatory)][string]$ScriptPath)
 
@@ -1895,6 +1900,47 @@ function Open-CpcvTrayDataFolder {
     Start-Process -FilePath "explorer.exe" -ArgumentList @(('"{0}"' -f $path)) | Out-Null
 }
 
+function Get-CpcvTrayInstalledVersion {
+    param(
+        [string]$VersionFile = (Join-Path $PSScriptRoot "VERSION")
+    )
+
+    # VERSION is bundled with each installer and portable release.  Treat it
+    # only as a short display value: a missing, linked, oversized, or malformed
+    # file must not put arbitrary content into the customer-facing UI.
+    try {
+        $item = Get-Item -LiteralPath $VersionFile -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or $item.Length -gt 128) {
+            return "unknown"
+        }
+        $version = (Get-Content -LiteralPath $VersionFile -Raw -ErrorAction Stop).Trim()
+        if ($version -match '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+            return $version
+        }
+    }
+    catch { }
+    return "unknown"
+}
+
+function Get-CpcvTrayUpdateMenuText {
+    param(
+        [AllowNull()][string]$InstalledVersion = (Get-CpcvTrayInstalledVersion)
+    )
+
+    # Keep this separate from the version reader so a future caller cannot
+    # accidentally render an unvalidated value in the native context menu.
+    if ($InstalledVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$') {
+        return "Get latest version... (version unavailable)"
+    }
+    return "Get latest version... (v$InstalledVersion)"
+}
+
+function Open-CpcvTrayReleasePage {
+    # Do not accept a URL argument here.  This is an explicit, visible browser
+    # handoff to the official release page, not an in-app updater.
+    Start-Process -FilePath $script:CpcvTrayReleaseUrl -ErrorAction Stop | Out-Null
+}
+
 function Show-CpcvTrayError {
     param([Parameter(Mandatory)][string]$Message)
     [void][System.Windows.Forms.MessageBox]::Show($Message, "cpcv", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
@@ -1916,6 +1962,8 @@ function Show-CpcvTrayStatusWindow {
     Add-Type -AssemblyName System.Drawing
     $windowIcon = Get-CpcvTrayIcon
     $logoImage = Get-CpcvTrayLogo
+    $installedVersion = Get-CpcvTrayInstalledVersion
+    $versionDetail = if ($installedVersion -eq "unknown") { "Version unavailable" } else { "Installed v$installedVersion" }
     $form = $null
     $tooltip = $null
     try {
@@ -1978,12 +2026,22 @@ function Show-CpcvTrayStatusWindow {
     $header.Controls.Add($title)
 
     $subtitle = New-Object System.Windows.Forms.Label
-    $subtitle.Text = "Clipboard image uploader"
+    $subtitle.Name = "cpcvTraySubtitle"
+    $subtitle.Text = "Clipboard image uploader  ·  $versionDetail"
     $subtitle.AutoSize = $true
     $subtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
     $subtitle.ForeColor = Get-CpcvTrayColor "#64748B"
     $subtitle.Location = New-Object System.Drawing.Point($(if ($logoImage) { 60 } else { 2 }), 34)
     $header.Controls.Add($subtitle)
+
+    $updateButton = New-Object System.Windows.Forms.Button
+    $updateButton.Name = "cpcvTrayUpdateButton"
+    $updateButton.Text = "Get latest version..."
+    $updateButton.Size = New-Object System.Drawing.Size(145, 34)
+    $updateButton.Location = New-Object System.Drawing.Point(516, 8)
+    $updateButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+    Set-CpcvTrayButtonStyle -Button $updateButton -Kind Quiet
+    $header.Controls.Add($updateButton)
 
     $refreshButton = New-Object System.Windows.Forms.Button
     $refreshButton.Name = "cpcvTrayRefreshButton"
@@ -2158,6 +2216,7 @@ function Show-CpcvTrayStatusWindow {
     $tooltip.SetToolTip($serviceButton, "Only processes started from this checkout can be changed.")
     $tooltip.SetToolTip($copyButton, "Copy the most recent validated remote path without displaying it here.")
     $tooltip.SetToolTip($tmuxButton, "Configure the optional cpcv path-insertion binding on the remote tmux server.")
+    $tooltip.SetToolTip($updateButton, "Open the official cpcv Releases page. You choose and verify any installer there.")
 
     $refreshDashboard = {
         param([Parameter(Mandatory)]$CurrentState)
@@ -2246,6 +2305,13 @@ function Show-CpcvTrayStatusWindow {
         }
         catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
+    $updateButton.Add_Click({
+        try {
+            Open-CpcvTrayReleasePage
+            $actionFeedback.Text = "Opened the official cpcv Releases page. Verify the SHA-256 before running a Setup EXE."
+        }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
+    })
     $tmuxButton.Add_Click({ try { Show-CpcvTrayTmuxSetupWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
     $logButton.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
     $dataButton.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
@@ -2288,6 +2354,7 @@ function Start-CpcvTrayApplication {
         $script:CpcvTrayState = Get-CpcvTrayState
         $script:CpcvTrayLastLevel = ""
         $script:CpcvTrayLastIconLevel = "Healthy"
+        $installedVersion = Get-CpcvTrayInstalledVersion
         $menu = New-Object System.Windows.Forms.ContextMenuStrip
         $statusItem = $menu.Items.Add("Loading status...")
         $statusItem.Enabled = $false
@@ -2304,6 +2371,7 @@ function Start-CpcvTrayApplication {
         $configItem = $menu.Items.Add("Settings...")
         $tmuxItem = $menu.Items.Add("Configure tmux path insertion...")
         $dataItem = $menu.Items.Add("Open data folder")
+        $updateItem = $menu.Items.Add((Get-CpcvTrayUpdateMenuText -InstalledVersion $installedVersion))
         [void]$menu.Items.Add("-")
         $exitItem = $menu.Items.Add("Exit tray (service stays running)")
 
@@ -2362,6 +2430,7 @@ function Start-CpcvTrayApplication {
         $configItem.Add_Click({ try { if (Show-CpcvTraySettingsWindow) { & $refreshUi } } catch { Show-CpcvTrayError $_.Exception.Message } })
         $tmuxItem.Add_Click({ try { Show-CpcvTrayTmuxSetupWindow } catch { Show-CpcvTrayError $_.Exception.Message } })
         $dataItem.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $updateItem.Add_Click({ try { Open-CpcvTrayReleasePage } catch { Show-CpcvTrayError $_.Exception.Message } })
         $notify.Add_DoubleClick({ & $refreshUi; Show-CpcvTrayStatusWindow -State $script:CpcvTrayState })
         $exitItem.Add_Click({ $context.ExitThread() })
 

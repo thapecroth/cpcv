@@ -11,7 +11,7 @@ the macOS job must not read a real system clipboard.
 | Syntax/build | Parses every PowerShell script, rejects dynamic evaluation, validates installer policy, and compiles the Inno Setup wizard from a clean export | `swiftc` builds the native uploader and menu-bar source; Bash and rendered Homebrew formula syntax are checked |
 | Process timeout | Safe simulated child-tree timeout in PowerShell | Native self-test creates a harmless local child process, forces the deadline, and verifies the child is gone |
 | Configuration | Strict numeric/path validation and local-only test configs | JSON schema/invariant checks plus native validation/redaction self-test |
-| Tray/status | Branded multi-size icon probe, bounded tooltip, and an off-screen synthetic dashboard action test | Native tray source build and fixed controller/status contract |
+| Tray/status | Branded multi-size icon probe, bounded tooltip, fixed official-release handoff, and an off-screen synthetic dashboard action test | Native tray source build and fixed controller/status contract |
 | Network | A compiled temporary fake `ssh.exe`/`scp.exe` exercises mkdir → copy → latest, failure, and recovery without a host | No SSH, `launchctl`, or clipboard calls in `macos/test-macos.sh` |
 
 The CI workflow runs Windows and `macos-latest` jobs. The native macOS test
