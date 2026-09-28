@@ -7,6 +7,28 @@ fixes increment the patch version.
 
 ## Unreleased
 
+### Added
+
+- Windows **Connection help…** now provides a guided, privacy-safe recovery
+  path for early SSH upload failures. It starts a new owned unattended SSH
+  helper with a read-only remote command, explains the result, opens local
+  settings, and enables a clipboard retry after the connection test succeeds.
+  Closing the assistant cancels its owned SSH/proxy process tree.
+
+- The Windows SSH guidance now distinguishes connection, no-prompt sign-in,
+  host-key, proxy/tunnel, and remote-folder failures. Sign-in guidance safely
+  explains approval and one-time-code prompts without collecting credentials.
+
+### Changed
+
+- Windows tray status now distinguishes a healthy local uploader from a
+  failed remote connection. Early SSH failures retain controlled diagnostic
+  categories for connection timeout, non-interactive sign-in, host-key review,
+  name resolution, and proxy/tunnel startup; no raw SSH output, host, path, or
+  proxy details enter the status UI or state file.
+- The status dashboard no longer suggests restarting a working local service
+  as the primary response to an SSH transport failure.
+
 ## v0.6.1 - 2026-09-27
 
 ### Added

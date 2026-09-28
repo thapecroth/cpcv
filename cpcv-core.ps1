@@ -641,6 +641,12 @@ function ConvertTo-CpcvUploadStatusReason {
     # a path, or an exception message.
     switch ([string]$Reason) {
         "ssh-mkdir-timeout" { return "ssh-mkdir-timeout" }
+        "ssh-mkdir-connect-timeout" { return "ssh-mkdir-connect-timeout" }
+        "ssh-mkdir-auth-failed" { return "ssh-mkdir-auth-failed" }
+        "ssh-mkdir-host-key-failed" { return "ssh-mkdir-host-key-failed" }
+        "ssh-mkdir-host-not-found" { return "ssh-mkdir-host-not-found" }
+        "ssh-mkdir-proxy-failed" { return "ssh-mkdir-proxy-failed" }
+        "ssh-mkdir-remote-folder-failed" { return "ssh-mkdir-remote-folder-failed" }
         "ssh-mkdir-failed" { return "ssh-mkdir-failed" }
         "scp-timeout" { return "scp-timeout" }
         "scp-failed" { return "scp-failed" }
@@ -966,6 +972,222 @@ function Publish-ClipboardImage {
     finally { $mutex.ReleaseMutex() | Out-Null; $mutex.Dispose() }
 }
 
+function Get-CpcvSshOptions {
+    <#
+    .SYNOPSIS
+    Returns the fixed, unattended SSH options used by cpcv uploads.
+
+    .DESCRIPTION
+    Keep this in the core so the uploader and a customer-requested connection
+    check have exactly the same SSH behavior.  The caller supplies only a
+    validated HostAlias and a fixed remote command; no UI text or shell
+    fragments are accepted here.
+    #>
+    return @(
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=8",
+        "-o", "ConnectionAttempts=1",
+        "-o", "ServerAliveInterval=3",
+        "-o", "ServerAliveCountMax=2"
+    )
+}
+
+function Get-CpcvSshConnectionFailureKind {
+    <#
+    .SYNOPSIS
+    Converts private SSH output into a small, display-safe diagnostic token.
+
+    .DESCRIPTION
+    SSH, a ProxyCommand, or an access tunnel can print a host name, URL, or
+    credential-like material.  This function intentionally consumes that
+    output only in memory and returns a controlled category.  The category is
+    suitable for an upload-status file or tray UI; the raw output remains in
+    the bounded, redacted local activity log only.
+    #>
+    param([Parameter(Mandatory)]$ProcessResult)
+
+    if ([bool]$ProcessResult.Ok) { return "connected" }
+    if ([bool]$ProcessResult.TimedOut) { return "command-timeout" }
+
+    $detail = @(
+        [string]$ProcessResult.StdErr,
+        [string]$ProcessResult.StdOut,
+        [string]$ProcessResult.Detail
+    ) -join "`n"
+
+    # Check the most actionable, observed connection-stage signatures first.
+    # A banner timeout can come from SSH itself or from a configured tunnel;
+    # neither raw implementation detail belongs in customer-facing state.
+    if ($detail -match '(?i)(timed out during banner exchange|banner exchange.*timed out|connection timed out|connection timeout|operation timed out)') {
+        return "connect-timeout"
+    }
+    if ($detail -match '(?i)(host key verification failed|remote host identification has changed|host key .*changed)') {
+        return "host-key"
+    }
+    # Do not treat every "Permission denied" message as an SSH sign-in
+    # failure.  The initial mkdir can itself be rejected by the remote file
+    # system, and that needs different customer guidance.
+    if ($detail -match '(?i)(permission denied\s*\((?:publickey|keyboard-interactive|password|gssapi-with-mic)[^)]*\)|permission denied,\s*please try again|sign_and_send_pubkey|agent refused|too many authentication failures|no supported authentication methods available|access denied\s*(?:\((?:publickey|keyboard-interactive|password|gssapi-with-mic)[^)]*\)|(?:for|by)\s+(?:user|authentication)))') {
+        return "authentication"
+    }
+    if ($detail -match '(?i)(could not resolve hostname|name or service not known|nodename nor servname)') {
+        return "host-not-found"
+    }
+    if ($detail -match '(?i)(proxycommand|proxy command).*(not found|failed|exited|error)') {
+        return "proxy"
+    }
+    return "connection-failed"
+}
+
+function Get-CpcvSshConnectionCheckPresentation {
+    <#
+    .SYNOPSIS
+    Returns the controlled customer-facing text for an SSH check result.
+
+    .DESCRIPTION
+    The process that checks the connection and the tray process deliberately
+    exchange only FailureKind.  Keeping every visible string here ensures a
+    child-process error, hostname, path, proxy URL, or credential can never
+    become UI text by accident.
+    #>
+    param([AllowNull()][string]$FailureKind)
+
+    switch ([string]$FailureKind) {
+        "connected" {
+            return [pscustomobject]@{
+                Ok = $true; FailureKind = "connected"; Summary = "Unattended SSH check passed"
+                Detail = "cpcv started a new unattended SSH process using its upload settings and did not change any remote files."
+                NextStep = "Retry the clipboard upload. This confirms the connection step only."
+            }
+        }
+        "connect-timeout" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "connect-timeout"; Summary = "Unattended SSH check timed out"
+                Detail = "The SSH greeting did not arrive before cpcv's connection deadline. No image was uploaded."
+                NextStep = "Check your network and SSH proxy or tunnel, then test again. An already-open terminal session can still work."
+            }
+        }
+        "authentication" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "authentication"; Summary = "Unattended SSH sign-in needs attention"
+                Detail = "cpcv could not complete a no-prompt sign-in. It cannot answer a password, passphrase, approval, security-key touch, or one-time-code prompt."
+                NextStep = "Complete any required approval in your normal SSH workflow, then make an approved unattended key or SSH agent available to cpcv and test again."
+            }
+        }
+        "host-key" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "host-key"; Summary = "SSH server identity needs review"
+                Detail = "cpcv did not bypass SSH host-key protection. No image was uploaded."
+                NextStep = "Review the server identity in your normal SSH workflow, then test again."
+            }
+        }
+        "host-not-found" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "host-not-found"; Summary = "SSH connection name was not found"
+                Detail = "cpcv could not resolve the configured SSH connection. No image was uploaded."
+                NextStep = "Open Settings and confirm the SSH connection name matches your normal SSH configuration."
+            }
+        }
+        "proxy" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "proxy"; Summary = "SSH proxy or tunnel needs attention"
+                Detail = "An unattended SSH process could not start through its configured proxy or tunnel. No image was uploaded."
+                NextStep = "Make sure the SSH proxy or tunnel is installed, signed in if required, and available to new processes, then test again."
+            }
+        }
+        "command-timeout" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "command-timeout"; Summary = "SSH check timed out"
+                Detail = "cpcv stopped the unattended SSH check before it completed. No image was uploaded."
+                NextStep = "Check your network and SSH connection, then test again."
+            }
+        }
+        "configuration" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "configuration"; Summary = "Connection settings need attention"
+                Detail = "cpcv could not start an SSH check until its local settings are corrected."
+                NextStep = "Open Settings and correct the SSH connection name, then test again."
+            }
+        }
+        "connection-failed" {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "connection-failed"; Summary = "Unattended SSH check failed"
+                Detail = "cpcv could not complete an unattended SSH check. No image was uploaded."
+                NextStep = "Open Settings to confirm the connection name, then check the redacted activity and test again."
+            }
+        }
+        default {
+            return [pscustomobject]@{
+                Ok = $false; FailureKind = "check-unavailable"; Summary = "Connection check could not run"
+                Detail = "cpcv could not complete the local connection check. No image was uploaded."
+                NextStep = "Open Settings to confirm the connection name, then try the check again."
+            }
+        }
+    }
+}
+
+function Get-CpcvSshConnectionCheckResult {
+    <#
+    .SYNOPSIS
+    Performs a read-only unattended SSH reachability check for the tray assistant.
+
+    .DESCRIPTION
+    The command starts a new non-interactive SSH process with the same
+    connection shape used by uploads, followed by POSIX `true`. It does not
+    upload an image or create/change a remote file. A user's SSH configuration
+    may still multiplex an existing transport, so the check never claims to
+    force a new network handshake. Only controlled fields leave this function,
+    so a caller cannot accidentally put raw SSH/ProxyCommand output into the
+    notification-area UI.
+    #>
+    # The long-running watcher keeps this canonical configuration object
+    # coherent after Settings saves. Reuse it for the check so the diagnostic
+    # runs with the same runtime values as the uploader; fall back only for a
+    # direct caller that loaded this function unusually.
+    $cfg = $script:CpcvConfig
+    if ($null -eq $cfg) { $cfg = Get-CpcvConfig }
+    if ($cfg.ConfigError) {
+        return (Get-CpcvSshConnectionCheckPresentation -FailureKind "configuration")
+    }
+
+    $probe = Invoke-CpcvProcess -FilePath "ssh" -Arguments ((Get-CpcvSshOptions) + @($cfg.HostAlias, "true")) -Label "ssh connection check"
+    $kind = Get-CpcvSshConnectionFailureKind -ProcessResult $probe
+    $result = Get-CpcvSshConnectionCheckPresentation -FailureKind $kind
+    Write-CpcvLog "ssh connection check result=$($result.FailureKind)"
+    return $result
+}
+
+function Get-CpcvSshMkdirFailureReason {
+    <#
+    .SYNOPSIS
+    Maps an initial upload SSH failure to a controlled status token.
+
+    .DESCRIPTION
+    Only the first SSH stage can distinguish a connection-start problem from
+    later transfer/finalization failures.  Unknown output retains the legacy
+    generic token for compatibility and privacy.
+    #>
+    param([Parameter(Mandatory)]$ProcessResult)
+
+    if ([bool]$ProcessResult.TimedOut) { return "ssh-mkdir-timeout" }
+    $detail = @(
+        [string]$ProcessResult.StdErr,
+        [string]$ProcessResult.StdOut,
+        [string]$ProcessResult.Detail
+    ) -join "`n"
+    if ($detail -match '(?i)(mkdir:.*permission denied|cannot create directory.*permission denied|mkdir:.*read-only file system)') {
+        return "ssh-mkdir-remote-folder-failed"
+    }
+    switch (Get-CpcvSshConnectionFailureKind -ProcessResult $ProcessResult) {
+        "connect-timeout" { return "ssh-mkdir-connect-timeout" }
+        "authentication" { return "ssh-mkdir-auth-failed" }
+        "host-key" { return "ssh-mkdir-host-key-failed" }
+        "host-not-found" { return "ssh-mkdir-host-not-found" }
+        "proxy" { return "ssh-mkdir-proxy-failed" }
+        default { return "ssh-mkdir-failed" }
+    }
+}
+
 function Invoke-CpcvClipboardUpload {
     param([switch]$CopyPath, [switch]$Force)
 
@@ -999,14 +1221,14 @@ function Invoke-CpcvClipboardUpload {
     $hostAlias = $cfg.HostAlias
     $remoteDir = $cfg.RemoteDir.Trim('/')
     $base = [IO.Path]::GetFileName($localFile)
-    $sshOpts = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ConnectionAttempts=1", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2")
+    $sshOpts = Get-CpcvSshOptions
 
     $mkdir = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, "mkdir -p `$HOME/$remoteDir")) -Label "ssh mkdir"
     if (-not $mkdir.Ok) {
         $detail = Protect-CpcvLogDetail $mkdir.Detail
         Write-CpcvLog "mkdir failed$($(if ($mkdir.TimedOut) { ' (timeout)' } else { '' })): $detail"
         Prune-CpcvCache -KeepPath $localFile
-        return @{ Ok = $false; Reason = if ($mkdir.TimedOut) { "ssh-mkdir-timeout" } else { "ssh-mkdir-failed" }; Detail = $detail }
+        return @{ Ok = $false; Reason = (Get-CpcvSshMkdirFailureReason -ProcessResult $mkdir); Detail = $detail }
     }
 
     $scp = Invoke-CpcvProcess -FilePath "scp" -Arguments ($sshOpts + @($localFile, "${hostAlias}:$remoteDir/$base")) -Label "scp upload"

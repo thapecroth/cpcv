@@ -119,6 +119,12 @@ try {
     Set-CpcvUploadStatus -Result "failed" -Reason "ssh-mkdir-timeout"
     $failedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
     Assert-Cpcv ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-timeout") "A controlled failed upload status was not readable."
+    Set-CpcvUploadStatus -Result "failed" -Reason "ssh-mkdir-connect-timeout"
+    $connectionTimeoutStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($connectionTimeoutStatus -and $connectionTimeoutStatus.Result -eq "failed" -and $connectionTimeoutStatus.Reason -eq "ssh-mkdir-connect-timeout") "A controlled SSH connection diagnostic was not readable."
+    Set-CpcvUploadStatus -Result "failed" -Reason "ssh-mkdir-remote-folder-failed"
+    $remoteFolderStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-Cpcv ($remoteFolderStatus -and $remoteFolderStatus.Result -eq "failed" -and $remoteFolderStatus.Reason -eq "ssh-mkdir-remote-folder-failed") "A controlled remote-folder diagnostic was not readable."
     Set-CpcvUploadStatus -Result "failed" -Reason "untrusted reason with spaces"
     $redactedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
     Assert-Cpcv ($redactedUploadStatus -and $redactedUploadStatus.Reason -eq "upload-failed") "Upload status accepted an uncontrolled failure reason."

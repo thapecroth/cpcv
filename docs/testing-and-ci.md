@@ -11,7 +11,7 @@ the macOS job must not read a real system clipboard.
 | Syntax/build | Parses every PowerShell script, rejects dynamic evaluation, validates installer policy, and compiles the Inno Setup wizard from a clean export | `swiftc` builds the native uploader and menu-bar source; Bash and rendered Homebrew formula syntax are checked |
 | Process timeout | Safe simulated child-tree timeout in PowerShell | Native self-test creates a harmless local child process, forces the deadline, and verifies the child is gone |
 | Configuration | Strict numeric/path validation and local-only test configs | JSON schema/invariant checks plus native validation/redaction self-test |
-| Tray/status | Branded multi-size icon probe, bounded tooltip, fixed official-release handoff, and an off-screen synthetic dashboard action test | Native tray source build and fixed controller/status contract |
+| Tray/status | Branded multi-size icon probe, bounded tooltip, fixed official-release handoff, controlled SSH failure categories, and off-screen dashboard/connection-assistant action tests | Native tray source build and fixed controller/status contract |
 | Network | A compiled temporary fake `ssh.exe`/`scp.exe` exercises mkdir → copy → latest, failure, and recovery without a host | No SSH, `launchctl`, or clipboard calls in `macos/test-macos.sh` |
 
 The CI workflow runs Windows and `macos-latest` jobs. The native macOS test
@@ -48,7 +48,11 @@ The Windows artifact test is deliberately stronger than a mocked unit test:
 against temporary native stand-ins, verifies byte-for-byte upload and
 `latest.png` behavior, then simulates a transport failure and recovery. The
 dashboard smoke test is invisible and has an in-loop deadline so CI or local
-checks cannot leave a dialog on a contributor's desktop.
+checks cannot leave a dialog on a contributor's desktop. The Windows
+connection-assistant test replaces its unattended SSH check with a controlled result;
+it verifies that the core selects the fixed unattended SSH options without
+opening a network connection, changing upload state, or exposing raw diagnostic
+output.
 
 Build validation also extracts the portable archive into a path containing
 spaces and runs the Windows suite there. That catches quoting regressions in

@@ -103,14 +103,50 @@ function Get-CpcvTrayUploadIssue {
     switch ($FailureReason) {
         "ssh-mkdir-timeout" {
             return [pscustomobject]@{
-                Summary = "Background SSH connection timed out"
-                Detail = "cpcv could not start the remote upload before its timeout. A terminal SSH session can still work; $retryDetail$countDetail"
+                Summary = "SSH upload setup timed out"
+                Detail = "The local uploader is running, but cpcv could not complete the first SSH upload step before its deadline. No image was sent. Open Connection help for guided steps.$countDetail"
+            }
+        }
+        "ssh-mkdir-connect-timeout" {
+            return [pscustomobject]@{
+                Summary = "SSH upload connection timed out"
+                Detail = "The local uploader is running, but cpcv's unattended SSH process did not receive an SSH greeting before its deadline. No image was sent. Open Connection help for guided steps.$countDetail"
+            }
+        }
+        "ssh-mkdir-auth-failed" {
+            return [pscustomobject]@{
+                Summary = "Unattended SSH sign-in needs attention"
+                Detail = "The local uploader is running, but cpcv could not complete a no-prompt sign-in. This can include a password, passphrase, approval, or one-time-code step. No image was sent. Open Connection help for guided steps.$countDetail"
+            }
+        }
+        "ssh-mkdir-host-key-failed" {
+            return [pscustomobject]@{
+                Summary = "SSH server identity needs review"
+                Detail = "The local uploader is running, and cpcv kept SSH host-key protection in place. No image was sent. Open Connection help for guided steps.$countDetail"
+            }
+        }
+        "ssh-mkdir-host-not-found" {
+            return [pscustomobject]@{
+                Summary = "SSH connection name was not found"
+                Detail = "The local uploader is running, but cpcv could not resolve the configured SSH connection. No image was sent. Open Connection help for guided steps.$countDetail"
+            }
+        }
+        "ssh-mkdir-proxy-failed" {
+            return [pscustomobject]@{
+                Summary = "SSH proxy or tunnel needs attention"
+                Detail = "The local uploader is running, but cpcv's unattended SSH process could not start through its proxy or tunnel. No image was sent. Open Connection help for guided steps.$countDetail"
+            }
+        }
+        "ssh-mkdir-remote-folder-failed" {
+            return [pscustomobject]@{
+                Summary = "Remote upload folder needs attention"
+                Detail = "cpcv reached the SSH target but could not prepare the configured remote image folder. No image was sent. Open Settings to review the remote folder, or ask the server administrator for access.$countDetail"
             }
         }
         "ssh-mkdir-failed" {
             return [pscustomobject]@{
-                Summary = "Background SSH connection failed"
-                Detail = "cpcv could not start the remote upload. $retryDetail$countDetail"
+                Summary = "SSH upload connection failed"
+                Detail = "The local uploader is running, but cpcv could not complete its unattended SSH process. No image was sent. Open Connection help for guided steps.$countDetail"
             }
         }
         "scp-timeout" {
@@ -155,6 +191,121 @@ function Get-CpcvTrayUploadIssue {
 function Test-CpcvTrayUploadIssue {
     param([Parameter(Mandatory)]$State)
     return ([string]$State.IssueKind -eq "Upload")
+}
+
+function Test-CpcvTraySshConnectionIssue {
+    <#
+    .SYNOPSIS
+    Indicates that the upload failed before it could prepare the remote folder.
+
+    .DESCRIPTION
+    This is deliberately narrower than a generic upload warning.  Transfer and
+    finalization errors should not send someone through an SSH-connection
+    walkthrough, while an early SSH failure can be checked safely without
+    uploading an image.
+    #>
+    param([Parameter(Mandatory)]$State)
+
+    if (-not (Test-CpcvTrayUploadIssue -State $State)) { return $false }
+    return ([string]$State.UploadFailureReason -in @(
+        "ssh-mkdir-timeout",
+        "ssh-mkdir-connect-timeout",
+        "ssh-mkdir-auth-failed",
+        "ssh-mkdir-host-key-failed",
+        "ssh-mkdir-host-not-found",
+        "ssh-mkdir-proxy-failed",
+        "ssh-mkdir-failed"
+    ))
+}
+
+function Get-CpcvTraySshTroubleshooting {
+    <#
+    .SYNOPSIS
+    Returns private-safe customer guidance for an initial SSH upload failure.
+
+    .DESCRIPTION
+    The assistant never uses raw log text, a host alias, remote path, or proxy
+    configuration.  It explains the known failure category using only the
+    token stored by the core and gives a fixed safe decision path.
+    #>
+    param([Parameter(Mandatory)]$State)
+
+    $reason = [string]$State.UploadFailureReason
+    $attempts = 0
+    try { $attempts = [int]$State.UploadFailureCount } catch { }
+    $attemptText = if ($attempts -gt 1) { "$attempts upload attempts have failed." } elseif ($attempts -eq 1) { "One upload attempt has failed." } else { "The most recent upload was not confirmed." }
+    $guardianCount = (@($State.Guardians)).Count
+    $watcherCount = (@($State.Watchers)).Count
+    $serviceRunning = ($guardianCount -gt 0 -and $watcherCount -gt 0)
+    $summary = if ($serviceRunning) {
+        "cpcv's local service is running. No image was sent during this SSH failure."
+    }
+    else {
+        "This SSH failure was recorded earlier. Refresh status to check whether the local service is running before troubleshooting the connection."
+    }
+    $supportCode = "CPCV-SSH-CONNECTION"
+
+    switch ($reason) {
+        "ssh-mkdir-connect-timeout" {
+            $title = "An unattended SSH check timed out"
+            $whatHappened = "A new unattended cpcv process did not receive an SSH greeting before cpcv's connection deadline. An already-open terminal session can still work because it may use its own signed-in session, agent, or tunnel."
+            $supportCode = "CPCV-SSH-CONNECT-TIMEOUT"
+        }
+        "ssh-mkdir-timeout" {
+            $title = "The first SSH upload step timed out"
+            $whatHappened = "cpcv could not complete the first SSH upload step before its deadline. An unattended SSH check can distinguish a connection problem from a later remote setup delay. An already-open terminal session can still work because it may use its own signed-in session, agent, or tunnel."
+            $supportCode = "CPCV-SSH-COMMAND-TIMEOUT"
+        }
+        "ssh-mkdir-auth-failed" {
+            $title = "An unattended SSH sign-in is required"
+            $whatHappened = "cpcv could not complete a no-prompt sign-in. It cannot answer a password, key passphrase, hardware-key touch, approval, or one-time-code prompt while automatic uploads run."
+            $supportCode = "CPCV-SSH-AUTH"
+        }
+        "ssh-mkdir-host-key-failed" {
+            $title = "SSH server identity needs review"
+            $whatHappened = "cpcv kept SSH host-key protection in place. It will not remove or accept a server identity automatically."
+            $supportCode = "CPCV-SSH-HOST-KEY"
+        }
+        "ssh-mkdir-host-not-found" {
+            $title = "The configured SSH connection was not found"
+            $whatHappened = "cpcv could not resolve the saved SSH connection name from the background uploader."
+            $supportCode = "CPCV-SSH-HOST-NOT-FOUND"
+        }
+        "ssh-mkdir-proxy-failed" {
+            $title = "The SSH proxy or tunnel needs attention"
+            $whatHappened = "A new unattended cpcv process could not start through its configured proxy or tunnel."
+            $supportCode = "CPCV-SSH-PROXY"
+        }
+        default {
+            $title = "An unattended SSH check could not start"
+            $whatHappened = "cpcv could not prepare the remote upload folder because its new unattended SSH process failed."
+        }
+    }
+
+    $steps = if ($reason -eq "ssh-mkdir-auth-failed") {
+        @(
+            "1. Select Test unattended SSH. It starts a new unattended cpcv process with the same no-prompt SSH settings as uploads and does not change remote files.",
+            "2. If a password, passphrase, approval, security-key touch, or one-time code is required, complete that step only in your normal SSH workflow. cpcv never asks for, stores, or pastes a code.",
+            "3. Make an approved unattended SSH key or agent available to cpcv, or ask your administrator which automated-upload method is approved.",
+            "4. Test again. When it succeeds, select Retry clipboard upload."
+        ) -join [Environment]::NewLine
+    }
+    else {
+        @(
+            "1. Select Test unattended SSH. It starts a new unattended cpcv process with the same no-prompt SSH settings as uploads and does not change remote files.",
+            "2. If it fails, check your network and any SSH proxy or tunnel, then make sure a new terminal SSH connection can start.",
+            "3. Select Open Settings and confirm the saved SSH connection name is the one cpcv should use.",
+            "4. When the test succeeds, select Retry clipboard upload."
+        ) -join [Environment]::NewLine
+    }
+
+    return [pscustomobject]@{
+        Title = $title
+        Summary = "$summary $attemptText"
+        WhatHappened = $whatHappened
+        Steps = $steps
+        SupportCode = $supportCode
+    }
 }
 
 function Get-CpcvTrayHeartbeatText {
@@ -251,8 +402,8 @@ function Get-CpcvTrayState {
     }
     elseif ($watchers.Count -eq 0) {
         $level = "Warning"
-        $summary = "Guardian is waiting for the watcher"
-        $detail = "The guardian should start it shortly; Restart service is safe if it does not."
+        $summary = "Automatic uploads are restarting"
+        $detail = "The guardian is running, but the clipboard watcher is not active yet. It will start a replacement automatically. Refresh status in a few seconds; use Repair service only if it stays missing."
         $issueKind = "Service"
     }
     elseif (-not $heartbeatInfo) {
@@ -328,7 +479,10 @@ function Get-CpcvTrayTooltip {
     # NotifyIcon accepts at most 63 characters.  Do not put hosts, paths, or
     # log details in a system-wide hover tooltip.
     $latestUpload = Get-CpcvTrayLatestUploadText -State $State
-    if ($State.Level -eq "Healthy" -and $latestUpload -match '^Uploaded ') {
+    if (Test-CpcvTraySshConnectionIssue -State $State) {
+        $text = "cpcv: Service running - SSH needs attention"
+    }
+    elseif ($State.Level -eq "Healthy" -and $latestUpload -match '^Uploaded ') {
         $text = "cpcv: Healthy - $latestUpload"
     }
     else {
@@ -402,7 +556,16 @@ function Get-CpcvTrayGuidance {
         "Error" { return "Open settings, correct the local configuration, then start the service." }
         "Warning" {
             if (Test-CpcvTrayUploadIssue -State $State) {
+                if (Test-CpcvTraySshConnectionIssue -State $State) {
+                    return "The local service is running. Open Connection help to test an unattended SSH process, then retry the clipboard upload after it succeeds."
+                }
+                if ([string]$State.UploadFailureReason -eq "ssh-mkdir-remote-folder-failed") {
+                    return "cpcv reached the SSH target but could not prepare the remote image folder. Review Settings or ask the server administrator for access before retrying."
+                }
                 return "cpcv will retry automatically when it sees an image. Use Retry clipboard upload to try now or View activity for details."
+            }
+            if ([string]$State.IssueKind -eq "Service" -and (@($State.Guardians)).Count -gt 0 -and (@($State.Watchers)).Count -eq 0) {
+                return "Automatic uploads are restarting. Refresh status in a few seconds; use Repair service only if the watcher stays missing."
             }
             return "Use Repair service if this does not clear after the next health check."
         }
@@ -807,6 +970,133 @@ function Start-CpcvTrayUpload {
     Write-CpcvLog "tray requested one-shot clipboard upload"
 }
 
+function Start-CpcvTraySshConnectionCheckProcess {
+    <#
+    .SYNOPSIS
+    Runs the read-only SSH connection check away from the WinForms UI thread.
+
+    .DESCRIPTION
+    The tray owns the helper process directly so cancelling the window also
+    stops its SSH and ProxyCommand descendants. The helper accepts no UI
+    command or target and emits only a controlled JSON category.
+    #>
+    $root = [IO.Path]::GetFullPath($PSScriptRoot)
+    $helper = Join-Path $root "cpcv-connection-check.ps1"
+    if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) {
+        throw "The cpcv connection-check helper is unavailable."
+    }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = ((@(
+        "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+        "-ExecutionPolicy", "RemoteSigned", "-File", $helper
+    ) | ForEach-Object { ConvertTo-CpcvCommandArgument ([string]$_) }) -join " ")
+    $psi.WorkingDirectory = $root
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    try {
+        if (-not $process.Start()) { throw "Process did not start." }
+        $outputLimit = ConvertTo-CpcvStrictInteger -Value $script:CpcvConfig.MaxCommandOutputBytes
+        $limit = if ($outputLimit.IsValid) { [Math]::Max(1024, $outputLimit.Value) } else { 65536 }
+        $stdoutSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList $limit
+        $stderrSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList $limit
+        return [pscustomobject]@{
+            Process = $process
+            StdOutSink = $stdoutSink
+            StdErrSink = $stderrSink
+            StdOutTask = $stdoutSink.PumpAsync($process.StandardOutput)
+            StdErrTask = $stderrSink.PumpAsync($process.StandardError)
+        }
+    }
+    catch {
+        $process.Dispose()
+        throw
+    }
+}
+
+function Receive-CpcvTraySshConnectionCheckProcess {
+    <#
+    .SYNOPSIS
+    Reads a completed connection-check helper without exposing its output.
+    #>
+    param([Parameter(Mandatory)]$Operation)
+
+    if ($null -eq $Operation.Process) {
+        return [pscustomobject]@{ Completed = $true; Result = (Get-CpcvSshConnectionCheckPresentation -FailureKind "check-unavailable") }
+    }
+    try {
+        if (-not $Operation.Process.HasExited) {
+            return [pscustomobject]@{ Completed = $false; Result = $null }
+        }
+    }
+    catch {
+        return [pscustomobject]@{ Completed = $true; Result = (Get-CpcvSshConnectionCheckPresentation -FailureKind "check-unavailable") }
+    }
+
+    $failureKind = "check-unavailable"
+    try {
+        $Operation.Process.WaitForExit()
+        $Operation.StdOutTask.Wait(2000) | Out-Null
+        $Operation.StdErrTask.Wait(2000) | Out-Null
+        $payload = [string]$Operation.StdOutSink.Text
+        $records = @($payload -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($Operation.Process.ExitCode -eq 0 -and
+            -not [bool]$Operation.StdOutSink.Truncated -and
+            -not [bool]$Operation.StdErrSink.Truncated -and
+            [string]::IsNullOrWhiteSpace([string]$Operation.StdErrSink.Text) -and
+            $records.Count -eq 1 -and
+            $records[0].Length -le 4096) {
+            $record = $records[0] | ConvertFrom-Json -ErrorAction Stop
+            if ($null -ne $record -and
+                $null -ne $record.PSObject.Properties["Version"] -and
+                $null -ne $record.PSObject.Properties["FailureKind"] -and
+                [string]$record.Version -eq "1" -and
+                [string]$record.FailureKind -in @(
+                    "connected", "connect-timeout", "authentication", "host-key",
+                    "host-not-found", "proxy", "command-timeout", "configuration",
+                    "connection-failed"
+                )) {
+                $failureKind = [string]$record.FailureKind
+            }
+        }
+    }
+    catch { }
+    finally {
+        # The helper's stdout/stderr can contain implementation detail if a
+        # dependency misbehaves. Discard both and rebuild text from the
+        # allowlisted token below.
+        try { $Operation.Process.Dispose() } catch { }
+        $Operation.Process = $null
+    }
+
+    return [pscustomobject]@{ Completed = $true; Result = (Get-CpcvSshConnectionCheckPresentation -FailureKind $failureKind) }
+}
+
+function Stop-CpcvTraySshConnectionCheckProcess {
+    param([AllowNull()]$Operation)
+
+    if ($null -eq $Operation -or $null -eq $Operation.Process) { return }
+    try {
+        if (-not $Operation.Process.HasExited) {
+            # Kill this directly owned wrapper plus ssh and any configured
+            # ProxyCommand/tunnel descendants; Stop-Job cannot guarantee it.
+            Stop-CpcvProcessTree -ProcessId $Operation.Process.Id
+        }
+    }
+    catch { }
+    try { $Operation.Process.WaitForExit(5000) | Out-Null } catch { }
+    try { $Operation.StdOutTask.Wait(2000) | Out-Null } catch { }
+    try { $Operation.StdErrTask.Wait(2000) | Out-Null } catch { }
+    try { $Operation.Process.Dispose() } catch { }
+    $Operation.Process = $null
+}
+
 function Copy-CpcvTrayLatestPath {
     param([Parameter(Mandatory)]$State)
     if ([string]::IsNullOrWhiteSpace($State.LatestPath) -or -not (Test-CpcvRemotePath $State.LatestPath)) {
@@ -950,6 +1240,334 @@ function Show-CpcvTrayRecentActivityWindow {
         [void]$form.ShowDialog()
     }
     finally {
+        if ($form) { $form.Dispose() }
+    }
+}
+
+function Show-CpcvTrayConnectionHelpWindow {
+    <#
+    .SYNOPSIS
+    Shows a guided, private-safe walkthrough for an early SSH upload failure.
+
+    .DESCRIPTION
+    The status dashboard is intentionally compact.  This separate assistant
+    keeps the customer-facing explanation, safe unattended SSH check, and
+    next steps together without turning the activity log into the primary
+    troubleshooting experience.
+    #>
+    param(
+        [Parameter(Mandatory)]$State,
+        [switch]$TestMode,
+        [switch]$UseAsyncWorker
+    )
+
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    $form = $null
+    $checkTimer = $null
+    $checkState = $null
+    try {
+        if (-not $TestMode) {
+            $State = Get-CpcvTrayState
+            if (-not (Test-CpcvTraySshConnectionIssue -State $State)) {
+                Show-CpcvTrayError "This SSH connection issue is no longer current. Refresh status to see the latest local service state."
+                return
+            }
+        }
+        $guide = Get-CpcvTraySshTroubleshooting -State $State
+        $form = New-Object System.Windows.Forms.Form
+        $form.Name = "cpcvTrayConnectionHelpWindow"
+        $form.Text = "cpcv connection assistant"
+        $form.StartPosition = if ($TestMode) { [System.Windows.Forms.FormStartPosition]::Manual } else { [System.Windows.Forms.FormStartPosition]::CenterScreen }
+        if ($TestMode) {
+            $form.Opacity = 0
+            $form.ShowInTaskbar = $false
+            $form.Location = New-Object System.Drawing.Point(-32000, -32000)
+        }
+        $form.ClientSize = New-Object System.Drawing.Size(760, 590)
+        $form.MinimumSize = New-Object System.Drawing.Size(650, 630)
+        $form.BackColor = Get-CpcvTrayColor "#F6F8FC"
+        $form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+        $form.KeyPreview = $true
+
+        $title = New-Object System.Windows.Forms.Label
+        $title.Name = "cpcvTrayConnectionHelpTitle"
+        $title.Text = "Connection assistant"
+        $title.AutoSize = $true
+        $title.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 18)
+        $title.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $title.Location = New-Object System.Drawing.Point(24, 20)
+        $form.Controls.Add($title)
+
+        $subtitle = New-Object System.Windows.Forms.Label
+        $subtitle.Name = "cpcvTrayConnectionHelpSubtitle"
+        $subtitle.Text = $guide.Summary
+        $subtitle.AutoSize = $false
+        $subtitle.ForeColor = Get-CpcvTrayColor "#475569"
+        $subtitle.Location = New-Object System.Drawing.Point(26, 52)
+        $subtitle.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $subtitle.Size = New-Object System.Drawing.Size(704, 38)
+        $form.Controls.Add($subtitle)
+
+        $issueBorder = New-Object System.Windows.Forms.Panel
+        $issueBorder.BackColor = Get-CpcvTrayColor "#FDE68A"
+        $issueBorder.Location = New-Object System.Drawing.Point(24, 96)
+        $issueBorder.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $issueBorder.Size = New-Object System.Drawing.Size(712, 104)
+        $form.Controls.Add($issueBorder)
+
+        $issue = New-Object System.Windows.Forms.Panel
+        $issue.Name = "cpcvTrayConnectionHelpIssue"
+        $issue.BackColor = Get-CpcvTrayColor "#FFFBEB"
+        $issue.Location = New-Object System.Drawing.Point(1, 1)
+        $issue.Size = New-Object System.Drawing.Size(710, 102)
+        $issue.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $issueBorder.Controls.Add($issue)
+
+        $issueTitle = New-Object System.Windows.Forms.Label
+        $issueTitle.Name = "cpcvTrayConnectionHelpIssueTitle"
+        $issueTitle.Text = $guide.Title
+        $issueTitle.AutoEllipsis = $true
+        $issueTitle.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 12)
+        $issueTitle.ForeColor = Get-CpcvTrayColor "#92400E"
+        $issueTitle.Location = New-Object System.Drawing.Point(16, 12)
+        $issueTitle.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $issueTitle.Size = New-Object System.Drawing.Size(670, 24)
+        $issue.Controls.Add($issueTitle)
+
+        $issueDetail = New-Object System.Windows.Forms.Label
+        $issueDetail.Name = "cpcvTrayConnectionHelpIssueDetail"
+        $issueDetail.Text = $guide.WhatHappened
+        $issueDetail.AutoEllipsis = $true
+        $issueDetail.ForeColor = Get-CpcvTrayColor "#78350F"
+        $issueDetail.Location = New-Object System.Drawing.Point(16, 40)
+        $issueDetail.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $issueDetail.Size = New-Object System.Drawing.Size(670, 48)
+        $issue.Controls.Add($issueDetail)
+
+        $stepsTitle = New-Object System.Windows.Forms.Label
+        $stepsTitle.Text = "What to do"
+        $stepsTitle.AutoSize = $true
+        $stepsTitle.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 11)
+        $stepsTitle.ForeColor = Get-CpcvTrayColor "#0F172A"
+        $stepsTitle.Location = New-Object System.Drawing.Point(24, 218)
+        $form.Controls.Add($stepsTitle)
+
+        $steps = New-Object System.Windows.Forms.TextBox
+        $steps.Name = "cpcvTrayConnectionHelpSteps"
+        $steps.Text = $guide.Steps
+        $steps.Multiline = $true
+        $steps.ReadOnly = $true
+        $steps.BorderStyle = [System.Windows.Forms.BorderStyle]::None
+        $steps.BackColor = $form.BackColor
+        $steps.ForeColor = Get-CpcvTrayColor "#334155"
+        $steps.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $steps.Location = New-Object System.Drawing.Point(26, 244)
+        $steps.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $steps.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+        $steps.Size = New-Object System.Drawing.Size(704, 120)
+        $form.Controls.Add($steps)
+
+        $checkBorder = New-Object System.Windows.Forms.Panel
+        $checkBorder.BackColor = Get-CpcvTrayColor "#CBD5E1"
+        $checkBorder.Location = New-Object System.Drawing.Point(24, 374)
+        $checkBorder.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $checkBorder.Size = New-Object System.Drawing.Size(712, 82)
+        $form.Controls.Add($checkBorder)
+
+        $checkPanel = New-Object System.Windows.Forms.Panel
+        $checkPanel.BackColor = [System.Drawing.Color]::White
+        $checkPanel.Location = New-Object System.Drawing.Point(1, 1)
+        $checkPanel.Size = New-Object System.Drawing.Size(710, 80)
+        $checkPanel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $checkBorder.Controls.Add($checkPanel)
+
+        $checkTitle = New-Object System.Windows.Forms.Label
+        $checkTitle.Name = "cpcvTrayConnectionCheckTitle"
+        $checkTitle.Text = "Next: test unattended SSH"
+        $checkTitle.AutoEllipsis = $true
+        $checkTitle.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
+        $checkTitle.ForeColor = Get-CpcvTrayColor "#1E293B"
+        $checkTitle.Location = New-Object System.Drawing.Point(14, 10)
+        $checkTitle.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $checkTitle.Size = New-Object System.Drawing.Size(674, 21)
+        $checkPanel.Controls.Add($checkTitle)
+
+        $checkDetail = New-Object System.Windows.Forms.Label
+        $checkDetail.Name = "cpcvTrayConnectionCheckDetail"
+        $checkDetail.Text = "This starts a new unattended cpcv process with upload settings. It does not use an open terminal process, upload an image, or change remote files."
+        $checkDetail.AutoEllipsis = $true
+        $checkDetail.ForeColor = Get-CpcvTrayColor "#475569"
+        $checkDetail.Location = New-Object System.Drawing.Point(14, 35)
+        $checkDetail.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $checkDetail.Size = New-Object System.Drawing.Size(674, 32)
+        $checkPanel.Controls.Add($checkDetail)
+
+        $test = New-Object System.Windows.Forms.Button
+        $test.Name = "cpcvTrayConnectionTestButton"
+        $test.Text = "Test unattended SSH"
+        $test.Size = New-Object System.Drawing.Size(172, 36)
+        $test.Location = New-Object System.Drawing.Point(24, 474)
+        Set-CpcvTrayButtonStyle -Button $test -Kind Primary
+        $form.Controls.Add($test)
+
+        $settings = New-Object System.Windows.Forms.Button
+        $settings.Name = "cpcvTrayConnectionSettingsButton"
+        $settings.Text = "Open Settings"
+        $settings.Size = New-Object System.Drawing.Size(126, 36)
+        $settings.Location = New-Object System.Drawing.Point(206, 474)
+        Set-CpcvTrayButtonStyle -Button $settings -Kind Secondary
+        $form.Controls.Add($settings)
+
+        $retry = New-Object System.Windows.Forms.Button
+        $retry.Name = "cpcvTrayConnectionRetryButton"
+        $retry.Text = "Retry clipboard upload"
+        $retry.Size = New-Object System.Drawing.Size(166, 36)
+        $retry.Location = New-Object System.Drawing.Point(342, 474)
+        $retry.Enabled = $false
+        Set-CpcvTrayButtonStyle -Button $retry -Kind Secondary
+        $form.Controls.Add($retry)
+
+        $activity = New-Object System.Windows.Forms.Button
+        $activity.Name = "cpcvTrayConnectionActivityButton"
+        $activity.Text = "View activity"
+        $activity.Size = New-Object System.Drawing.Size(120, 36)
+        $activity.Location = New-Object System.Drawing.Point(518, 474)
+        Set-CpcvTrayButtonStyle -Button $activity -Kind Quiet
+        $form.Controls.Add($activity)
+
+        $close = New-Object System.Windows.Forms.Button
+        $close.Name = "cpcvTrayConnectionCloseButton"
+        $close.Text = "Close"
+        $close.Size = New-Object System.Drawing.Size(92, 30)
+        $close.Location = New-Object System.Drawing.Point(644, 526)
+        $close.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+        $close.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        Set-CpcvTrayButtonStyle -Button $close -Kind Quiet
+        $form.Controls.Add($close)
+        $form.CancelButton = $close
+
+        $support = New-Object System.Windows.Forms.Label
+        $support.Name = "cpcvTrayConnectionSupportCode"
+        $support.Text = "Safe support code: $($guide.SupportCode)"
+        $support.AutoEllipsis = $true
+        $support.ForeColor = Get-CpcvTrayColor "#64748B"
+        $support.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
+        $support.Location = New-Object System.Drawing.Point(24, 526)
+        $support.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+        $support.Size = New-Object System.Drawing.Size(602, 24)
+        $form.Controls.Add($support)
+
+        $setBusy = {
+            param([bool]$Busy)
+            $test.Enabled = -not $Busy
+            $settings.Enabled = -not $Busy
+            $activity.Enabled = -not $Busy
+            $retry.Enabled = (-not $Busy -and [bool]$form.Tag)
+            $close.Text = if ($Busy) { "Cancel and close" } else { "Close" }
+        }.GetNewClosure()
+        $renderCheck = {
+            param([Parameter(Mandatory)]$Result)
+            $checkTitle.Text = ConvertTo-CpcvTrayDisplayText -Text ([string]$Result.Summary) -MaximumLength 180
+            $checkDetail.Text = ConvertTo-CpcvTrayDisplayText -Text ("$($Result.Detail) $($Result.NextStep)") -MaximumLength 300
+            if ([bool]$Result.Ok) {
+                $checkTitle.ForeColor = Get-CpcvTrayColor "#0F766E"
+                $checkDetail.ForeColor = Get-CpcvTrayColor "#115E59"
+                $form.Tag = $true
+            }
+            else {
+                $checkTitle.ForeColor = Get-CpcvTrayColor "#B45309"
+                $checkDetail.ForeColor = Get-CpcvTrayColor "#92400E"
+                $form.Tag = $false
+            }
+            & $setBusy $false
+        }.GetNewClosure()
+
+        $checkState = [ordered]@{ Operation = $null; StartedAt = $null }
+        $checkTimer = New-Object System.Windows.Forms.Timer
+        $checkTimer.Interval = 150
+        $checkTimer.Add_Tick({
+            if ($null -eq $checkState.Operation) {
+                $checkTimer.Stop()
+                return
+            }
+            $completion = Receive-CpcvTraySshConnectionCheckProcess -Operation $checkState.Operation
+            if (-not $completion.Completed) {
+                if ($checkState.StartedAt -and ((Get-Date) - $checkState.StartedAt).TotalSeconds -ge 2) {
+                    $checkTitle.Text = "Testing unattended SSH..."
+                    $checkDetail.Text = "This can take up to cpcv's configured command timeout. You can cancel and close this window."
+                }
+                return
+            }
+            $checkTimer.Stop()
+            $checkState.Operation = $null
+            $checkState.StartedAt = $null
+            & $renderCheck $completion.Result
+        }.GetNewClosure())
+
+        $startCheck = {
+            try {
+                & $setBusy $true
+                $checkTitle.Text = "Testing unattended SSH..."
+                $checkDetail.Text = "This is read-only and does not upload an image or change remote files."
+                if ($TestMode -and -not $UseAsyncWorker) {
+                    & $renderCheck (Get-CpcvSshConnectionCheckResult)
+                    return
+                }
+                $checkState.Operation = Start-CpcvTraySshConnectionCheckProcess
+                $checkState.StartedAt = Get-Date
+                $checkTimer.Start()
+            }
+            catch {
+                & $renderCheck (Get-CpcvSshConnectionCheckPresentation -FailureKind "check-unavailable")
+            }
+        }.GetNewClosure()
+
+        $test.Add_Click({ & $startCheck }.GetNewClosure())
+        $settings.Add_Click({
+            try {
+                $settingsSaved = [bool](Show-CpcvTraySettingsWindow)
+                if ($settingsSaved) {
+                    # A saved connection name, SSH folder, or related setting
+                    # changes what a prior check proved. Require a new check
+                    # before allowing an upload retry.
+                    $form.Tag = $false
+                    $checkTitle.Text = "Settings saved - test again"
+                    $checkDetail.Text = "The SSH settings may have changed. Test unattended SSH again before retrying the clipboard upload."
+                    & $setBusy $false
+                }
+                else {
+                    $checkTitle.Text = "Settings closed - no changes saved"
+                    $checkDetail.Text = "Your previous connection-check result is unchanged."
+                }
+            }
+            catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
+        }.GetNewClosure())
+        $retry.Add_Click({
+            try {
+                Start-CpcvTrayUpload
+                $checkTitle.Text = "Clipboard upload requested"
+                $checkDetail.Text = "cpcv will update the status after the current clipboard image is processed."
+                $retry.Enabled = $false
+            }
+            catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
+        }.GetNewClosure())
+        $activity.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } }.GetNewClosure())
+        $close.Add_Click({ $form.Close() }.GetNewClosure())
+        $form.Add_FormClosing({
+            if ($checkState -and $checkState.Operation) {
+                Stop-CpcvTraySshConnectionCheckProcess -Operation $checkState.Operation
+                $checkState.Operation = $null
+            }
+        }.GetNewClosure())
+        $form.Add_KeyDown({ if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $form.Close() } })
+
+        [void]$form.ShowDialog()
+    }
+    finally {
+        if ($checkTimer) { $checkTimer.Stop(); $checkTimer.Dispose() }
+        if ($checkState -and $checkState.Operation) { Stop-CpcvTraySshConnectionCheckProcess -Operation $checkState.Operation }
         if ($form) { $form.Dispose() }
     }
 }
@@ -1170,6 +1788,12 @@ function Show-CpcvTraySettingsWindow {
                     $draft[$key] = $inputs[$key].Text.Trim()
                 }
                 [void](Save-CpcvConfig -Config $draft)
+                # A persisted connection change invalidates any earlier
+                # connection test even if the service restart below fails.
+                # Keep this result separate from restart success so callers
+                # can refresh/invalidate safely after the dialog closes.
+                $form.Tag = $true
+                $close.Text = "Close"
                 try {
                     Restart-CpcvTrayService
                 }
@@ -1177,7 +1801,6 @@ function Show-CpcvTraySettingsWindow {
                     $feedback.Text = "Settings were saved, but cpcv could not restart. Use the service controls after resolving the local error."
                     return
                 }
-                $form.Tag = $true
                 $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
                 $form.Close()
             }
@@ -2192,14 +2815,35 @@ function Show-CpcvTrayStatusWindow {
     Set-CpcvTrayButtonStyle -Button $tmuxButton -Kind Quiet
     $actions.Controls.Add($tmuxButton)
 
+    $connectionButton = New-Object System.Windows.Forms.Button
+    $connectionButton.Name = "cpcvTrayConnectionHelpButton"
+    $connectionButton.Text = "Connection help..."
+    $connectionButton.Size = New-Object System.Drawing.Size(160, 30)
+    # The connection action appears only for an SSH-stage upload issue.  It
+    # shares the guidance row rather than being squeezed into the five-button
+    # row, so it remains reachable at the dashboard's minimum width.
+    $connectionButton.Location = New-Object System.Drawing.Point(20, 158)
+    Set-CpcvTrayButtonStyle -Button $connectionButton -Kind Quiet
+    $actions.Controls.Add($connectionButton)
+
     $actionFeedback = New-Object System.Windows.Forms.Label
+    $actionFeedback.Name = "cpcvTrayActionFeedback"
     $actionFeedback.AutoEllipsis = $true
     $actionFeedback.Font = New-Object System.Drawing.Font("Segoe UI", 8.5)
     $actionFeedback.ForeColor = Get-CpcvTrayColor "#475569"
     $actionFeedback.Location = New-Object System.Drawing.Point(20, 158)
-    $actionFeedback.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
     $actionFeedback.Size = New-Object System.Drawing.Size(750, 20)
     $actions.Controls.Add($actionFeedback)
+
+    # Keep status guidance visible beside the issue-specific action.  The
+    # calculation is repeated on resize because the dashboard is resizable.
+    $layoutActionFeedback = {
+        $left = if ($connectionButton.Visible) { 190 } else { 20 }
+        $width = [Math]::Max(0, $actions.ClientSize.Width - $left - 20)
+        $actionFeedback.Location = New-Object System.Drawing.Point($left, 158)
+        $actionFeedback.Size = New-Object System.Drawing.Size($width, 20)
+    }.GetNewClosure()
+    $actions.Add_Resize({ & $layoutActionFeedback })
 
     $footer = New-Object System.Windows.Forms.Label
     $footer.Text = "Tip: take a screenshot as usual; cpcv reacts only to image clipboard entries."
@@ -2216,6 +2860,7 @@ function Show-CpcvTrayStatusWindow {
     $tooltip.SetToolTip($serviceButton, "Only processes started from this checkout can be changed.")
     $tooltip.SetToolTip($copyButton, "Copy the most recent validated remote path without displaying it here.")
     $tooltip.SetToolTip($tmuxButton, "Configure the optional cpcv path-insertion binding on the remote tmux server.")
+    $tooltip.SetToolTip($connectionButton, "Explain and safely test a new unattended SSH process. This never uploads an image during the test.")
     $tooltip.SetToolTip($updateButton, "Open the official cpcv Releases page. You choose and verify any installer there.")
 
     $refreshDashboard = {
@@ -2236,16 +2881,28 @@ function Show-CpcvTrayStatusWindow {
         $guardianCount = (@($CurrentState.Guardians)).Count
         $watcherCount = (@($CurrentState.Watchers)).Count
         $serviceRunning = ($guardianCount -gt 0 -or $watcherCount -gt 0)
-        $serviceCard.Value.Text = if ($CurrentState.Level -eq "Healthy") { "Running" } elseif ($serviceRunning) { "Needs attention" } else { "Stopped" }
-        $serviceCard.Value.ForeColor = Get-CpcvTrayColor $style.Foreground
-        $serviceCard.Detail.Text = "$guardianCount guardian; $watcherCount watcher"
+        $hasUploadIssue = Test-CpcvTrayUploadIssue -State $CurrentState
+        $hasSshConnectionIssue = Test-CpcvTraySshConnectionIssue -State $CurrentState
+        $serviceCard.Value.Text = if ($CurrentState.Level -eq "Healthy" -or ($hasUploadIssue -and $serviceRunning)) {
+            "Running"
+        }
+        elseif ($guardianCount -gt 0 -and $watcherCount -eq 0) {
+            "Recovering"
+        }
+        elseif ($serviceRunning) {
+            "Needs attention"
+        }
+        else {
+            "Stopped"
+        }
+        $serviceCard.Value.ForeColor = if ($hasUploadIssue -and $serviceRunning) { Get-CpcvTrayColor "#0F766E" } else { Get-CpcvTrayColor $style.Foreground }
+        $serviceCard.Detail.Text = if ($hasUploadIssue -and $serviceRunning) { "$guardianCount guardian; $watcherCount watcher · local service is running" } else { "$guardianCount guardian; $watcherCount watcher" }
         $heartbeatCard.Value.Text = Get-CpcvTrayRelativeTimeText -AgeSeconds $CurrentState.HeartbeatAgeSeconds
         $heartbeatCard.Detail.Text = Get-CpcvTrayHeartbeatText -Heartbeat $CurrentState.Heartbeat
         $hasLatestPath = (-not [string]::IsNullOrWhiteSpace($CurrentState.LatestPath) -and (Test-CpcvRemotePath $CurrentState.LatestPath))
         $latestCard.Value.Text = Get-CpcvTrayLatestUploadText -State $CurrentState
         $latestCard.Detail.Text = if ($hasLatestPath) { "Latest path is available locally" } else { "Upload an image to create one" }
 
-        $hasUploadIssue = Test-CpcvTrayUploadIssue -State $CurrentState
         $uploadButton.Enabled = $CurrentState.Level -ne "Error"
         $uploadButton.Text = if ($hasUploadIssue) { "Retry clipboard upload" } else { "Upload clipboard image" }
         $copyButton.Enabled = $hasLatestPath
@@ -2254,7 +2911,7 @@ function Show-CpcvTrayStatusWindow {
             "Start automatic uploads"
         }
         elseif ($hasUploadIssue) {
-            "Restart service"
+            "Service is running"
         }
         elseif ($CurrentState.Level -in @("Warning", "Unknown")) {
             "Repair service"
@@ -2262,8 +2919,11 @@ function Show-CpcvTrayStatusWindow {
         else {
             "Restart service"
         }
-        $serviceButton.Enabled = ($CurrentState.Level -ne "Error" -and $CurrentState.GuardianProbeAvailable -and ((-not $serviceRunning) -or $CurrentState.WatcherProbeAvailable))
+        $serviceButton.Enabled = ($CurrentState.Level -ne "Error" -and -not $hasUploadIssue -and $CurrentState.GuardianProbeAvailable -and ((-not $serviceRunning) -or $CurrentState.WatcherProbeAvailable))
+        $connectionButton.Visible = $hasSshConnectionIssue
+        $connectionButton.Enabled = $hasSshConnectionIssue
         $actionFeedback.Text = Get-CpcvTrayGuidance -State $CurrentState
+        & $layoutActionFeedback
         $form.Text = "cpcv status - $($style.Badge)"
     }.GetNewClosure()
 
@@ -2313,6 +2973,14 @@ function Show-CpcvTrayStatusWindow {
         catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
     })
     $tmuxButton.Add_Click({ try { Show-CpcvTrayTmuxSetupWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
+    $connectionButton.Add_Click({
+        try {
+            $currentState = Get-CpcvTrayState
+            Show-CpcvTrayConnectionHelpWindow -State $currentState
+            & $refreshDashboard (Get-CpcvTrayState)
+        }
+        catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) }
+    })
     $logButton.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
     $dataButton.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError (ConvertTo-CpcvTrayDisplayText -Text $_.Exception.Message) } })
 
@@ -2369,6 +3037,7 @@ function Start-CpcvTrayApplication {
         [void]$menu.Items.Add("-")
         $logItem = $menu.Items.Add("View recent activity...")
         $configItem = $menu.Items.Add("Settings...")
+        $connectionHelpItem = $menu.Items.Add("Connection help...")
         $tmuxItem = $menu.Items.Add("Configure tmux path insertion...")
         $dataItem = $menu.Items.Add("Open data folder")
         $updateItem = $menu.Items.Add((Get-CpcvTrayUpdateMenuText -InstalledVersion $installedVersion))
@@ -2389,7 +3058,10 @@ function Start-CpcvTrayApplication {
             $script:CpcvTrayState = Get-CpcvTrayState
             $state = $script:CpcvTrayState
             $latestUpload = Get-CpcvTrayLatestUploadText -State $state
-            $statusItem.Text = if ($state.Level -eq "Healthy" -and $latestUpload -match '^Uploaded ') {
+            $statusItem.Text = if (Test-CpcvTraySshConnectionIssue -State $state) {
+                "Status: Service running - SSH needs attention"
+            }
+            elseif ($state.Level -eq "Healthy" -and $latestUpload -match '^Uploaded ') {
                 "Status: Healthy - $latestUpload"
             }
             else {
@@ -2401,9 +3073,12 @@ function Start-CpcvTrayApplication {
             }
             $notify.Text = Get-CpcvTrayTooltip -State $state
             $isRunning = ((@($state.Guardians)).Count -gt 0 -or (@($state.Watchers)).Count -gt 0)
+            $hasUploadIssue = Test-CpcvTrayUploadIssue -State $state
             $startItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and -not $isRunning)
             $stopItem.Enabled = ($state.GuardianProbeAvailable -and $state.WatcherProbeAvailable -and $isRunning)
-            $restartItem.Enabled = ($state.Level -ne "Error" -and $state.GuardianProbeAvailable -and $state.WatcherProbeAvailable)
+            $restartItem.Enabled = ($state.Level -ne "Error" -and -not $hasUploadIssue -and $state.GuardianProbeAvailable -and $state.WatcherProbeAvailable)
+            $connectionHelpItem.Visible = Test-CpcvTraySshConnectionIssue -State $state
+            $connectionHelpItem.Enabled = $connectionHelpItem.Visible
             $copyItem.Enabled = (-not [string]::IsNullOrWhiteSpace($state.LatestPath) -and (Test-CpcvRemotePath $state.LatestPath))
             if ($script:CpcvTrayLastLevel -and $script:CpcvTrayLastLevel -ne $state.Level) {
                 if ($state.Level -in @("Warning", "Error")) {
@@ -2428,6 +3103,7 @@ function Start-CpcvTrayApplication {
         $restartItem.Add_Click({ try { Restart-CpcvTrayService; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
         $logItem.Add_Click({ try { Show-CpcvTrayRecentActivityWindow } catch { Show-CpcvTrayError $_.Exception.Message } })
         $configItem.Add_Click({ try { if (Show-CpcvTraySettingsWindow) { & $refreshUi } } catch { Show-CpcvTrayError $_.Exception.Message } })
+        $connectionHelpItem.Add_Click({ try { & $refreshUi; Show-CpcvTrayConnectionHelpWindow -State $script:CpcvTrayState; & $refreshUi } catch { Show-CpcvTrayError $_.Exception.Message } })
         $tmuxItem.Add_Click({ try { Show-CpcvTrayTmuxSetupWindow } catch { Show-CpcvTrayError $_.Exception.Message } })
         $dataItem.Add_Click({ try { Open-CpcvTrayDataFolder } catch { Show-CpcvTrayError $_.Exception.Message } })
         $updateItem.Add_Click({ try { Open-CpcvTrayReleasePage } catch { Show-CpcvTrayError $_.Exception.Message } })
