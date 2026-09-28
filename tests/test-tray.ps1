@@ -296,16 +296,21 @@ if ((Get-CpcvConfig).HostAlias -ne 'session-host') { throw 'Runtime configuratio
     $failureTooltip = Get-CpcvTrayTooltip -State $uploadFailure
     Assert-CpcvTray ($failureTooltip.Length -le 63 -and $failureTooltip -notmatch "example-host|clipboard-images") "Upload-failure tooltip was not bounded and private."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f (Get-Date).ToUniversalTime().ToString("o"))
+    # Make state ordering explicit rather than relying on clock resolution: a
+    # newer watcher retry must supersede an older confirmed one-shot upload,
+    # while a later confirmed upload must clear that retry warning.
+    $confirmedUploadAt = (Get-Date).ToUniversalTime().AddSeconds(-10)
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f $confirmedUploadAt.ToString("o"))
     $recovered = Get-CpcvTrayState
     Assert-CpcvTray ($recovered.Level -eq "Healthy" -and $recovered.IssueKind -eq "") "A confirmed successful upload did not clear the upload warning."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $retryHeartbeatAt = $confirmedUploadAt.AddSeconds(5)
+    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f $retryHeartbeatAt.ToString("o"))
     $legacyRetry = Get-CpcvTrayState
     Assert-CpcvTray ($legacyRetry.Level -eq "Warning" -and $legacyRetry.IssueKind -eq "Upload" -and $legacyRetry.UploadFailureCount -eq 2) "A retrying legacy watcher heartbeat did not fail visibly."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f (Get-Date).ToUniversalTime().AddSeconds(-2).ToString("o"))
-    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f (Get-Date).ToUniversalTime().ToString("o"))
+    Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=2" -f $retryHeartbeatAt.AddSeconds(-2).ToString("o"))
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=succeeded" -f $retryHeartbeatAt.AddSeconds(1).ToString("o"))
     $manualRecovery = Get-CpcvTrayState
     Assert-CpcvTray ($manualRecovery.Level -eq "Healthy" -and $manualRecovery.UploadFailureCount -eq 0) "A newer confirmed manual retry did not clear an older watcher retry warning."
 
