@@ -89,6 +89,11 @@ remote paths out of casual display; use **Copy latest path** when you need it.
 Its notification-area hover text and dashboard report the age of the last
 successful upload when the service is healthy, without revealing an SSH host or
 remote path.
+The Windows tray also shows its bundled version and offers **Get latest
+version…**. That is an explicit handoff to a fixed official GitHub Releases
+URL; it never polls for, downloads, verifies, or runs a release asset. A person
+must select a versioned Setup EXE, verify it against `SHA256SUMS.txt`, and run
+the visible wizard themselves.
 Neither interface accepts arbitrary commands, exposes raw SSH output in a
 tooltip, or holds SSH credentials.
 

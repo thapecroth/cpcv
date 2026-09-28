@@ -7,6 +7,15 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.6.1 - 2026-09-27
+
+### Added
+
+- Windows tray and status dashboard now show the bundled version and provide a
+  **Get latest version…** action. It opens only the official cpcv GitHub
+  Releases page so a person can choose, checksum-verify, and visibly run a
+  versioned Setup EXE.
+
 ### Fixed
 
 - Windows tray status now distinguishes a live watcher from a failed or
