@@ -7,6 +7,19 @@ fixes increment the patch version.
 
 ## Unreleased
 
+### Added
+
+- Windows uploads can recover from orphaned legacy Cloudflare Access login
+  locks. Recovery is limited to the configured direct Cloudflare SSH proxy,
+  preserves live connections and token files, and uses a bounded normal
+  sign-in refresh with a ten-minute cooldown. Uploads resume on their next
+  retry; the tray requests normal sign-in when user interaction is needed.
+
+### Fixed
+
+- Windows PowerShell startup explicitly loads its native configuration reader,
+  including when the app inherits a PowerShell 7 module search path.
+
 ## v0.7.0 - 2026-09-30
 
 ### Added

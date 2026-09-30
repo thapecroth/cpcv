@@ -13,6 +13,7 @@ the macOS job must not read a real system clipboard.
 | Configuration | Strict numeric/path validation and local-only test configs | JSON schema/invariant checks plus native validation/redaction self-test |
 | Tray/status | Branded multi-size icon probe, bounded tooltip, fixed official-release handoff, controlled SSH failure categories, and off-screen dashboard/connection-assistant action tests | Native tray source build and fixed controller/status contract |
 | Network | A compiled temporary fake `ssh.exe`/`scp.exe` exercises mkdir → copy → latest, failure, and recovery without a host | No SSH, `launchctl`, or clipboard calls in `macos/test-macos.sh` |
+| Cloudflare recovery | Temporary cache files and fake discovery, HTTP, and process adapters verify old-lock cleanup, active-login preservation, cooldown, bounded refresh, and token-output privacy | Windows-specific adapter; native transport guarantees are unchanged |
 
 The CI workflow runs Windows and `macos-latest` jobs. The native macOS test
 entry point is:
@@ -53,6 +54,13 @@ connection-assistant test replaces its unattended SSH check with a controlled re
 it verifies that the core selects the fixed unattended SSH options without
 opening a network connection, changing upload state, or exposing raw diagnostic
 output.
+
+`tests/test-cloudflare-recovery.ps1` exercises Cloudflare recovery without
+reading a real token cache, invoking Cloudflare, or connecting to an SSH host.
+It checks exact application scope, fresh/nonempty locks, active login and
+longstanding SSH processes, path/link rejection, throttling, and refresh
+success/failure. The tests use synthetic placeholders; live credentials and
+real authentication locks must never be used as fixtures.
 
 Build validation also extracts the portable archive into a path containing
 spaces and runs the Windows suite there. That catches quoting regressions in

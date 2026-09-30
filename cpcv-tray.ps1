@@ -101,6 +101,18 @@ function Get-CpcvTrayUploadIssue {
     $retryDetail = "cpcv will retry automatically when it sees an image in the clipboard."
     $countDetail = if ($FailureCount -gt 1) { " $FailureCount attempts have failed." } elseif ($FailureCount -eq 1) { " One attempt has failed." } else { "" }
     switch ($FailureReason) {
+        "cloudflare-retry" {
+            return [pscustomobject]@{
+                Summary = "Cloudflare connection recovered"
+                Detail = "cpcv refreshed Cloudflare sign-in after a connection failure. The clipboard image will retry automatically."
+            }
+        }
+        "cloudflare-sign-in-required" {
+            return [pscustomobject]@{
+                Summary = "Cloudflare sign-in needs attention"
+                Detail = "The local uploader is running. Complete Cloudflare sign-in through your normal SSH workflow, then cpcv will retry automatically. cpcv does not collect passwords or one-time codes.$countDetail"
+            }
+        }
         "ssh-mkdir-timeout" {
             return [pscustomobject]@{
                 Summary = "SSH upload setup timed out"
@@ -208,6 +220,7 @@ function Test-CpcvTraySshConnectionIssue {
 
     if (-not (Test-CpcvTrayUploadIssue -State $State)) { return $false }
     return ([string]$State.UploadFailureReason -in @(
+        "cloudflare-sign-in-required",
         "ssh-mkdir-timeout",
         "ssh-mkdir-connect-timeout",
         "ssh-mkdir-auth-failed",
@@ -246,6 +259,11 @@ function Get-CpcvTraySshTroubleshooting {
     $supportCode = "CPCV-SSH-CONNECTION"
 
     switch ($reason) {
+        "cloudflare-sign-in-required" {
+            $title = "Cloudflare sign-in is required"
+            $whatHappened = "cpcv found a stale Cloudflare login lock and tried the normal sign-in refresh. The refresh still needs your interaction. Existing terminal SSH sessions can remain connected while a new connection needs sign-in."
+            $supportCode = "CPCV-CLOUDFLARE-SIGN-IN"
+        }
         "ssh-mkdir-connect-timeout" {
             $title = "An unattended SSH check timed out"
             $whatHappened = "A new unattended cpcv process did not receive an SSH greeting before cpcv's connection deadline. An already-open terminal session can still work because it may use its own signed-in session, agent, or tunnel."
@@ -282,7 +300,14 @@ function Get-CpcvTraySshTroubleshooting {
         }
     }
 
-    $steps = if ($reason -eq "ssh-mkdir-auth-failed") {
+    $steps = if ($reason -eq "cloudflare-sign-in-required") {
+        @(
+            "1. Open a new SSH connection through your normal terminal workflow and complete any Cloudflare browser sign-in.",
+            "2. Complete passwords, approval, security-key touches, and one-time codes yourself. cpcv never collects or submits them.",
+            "3. Select Test unattended SSH. When it succeeds, select Retry clipboard upload. Automatic uploads also keep retrying."
+        ) -join [Environment]::NewLine
+    }
+    elseif ($reason -eq "ssh-mkdir-auth-failed") {
         @(
             "1. Select Test unattended SSH. It starts a new unattended cpcv process with the same no-prompt SSH settings as uploads and does not change remote files.",
             "2. If a password, passphrase, approval, security-key touch, or one-time code is required, complete that step only in your normal SSH workflow. cpcv never asks for, stores, or pastes a code.",

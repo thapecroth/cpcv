@@ -104,6 +104,22 @@ clipboard retry. For interactive authentication—including approval or
 one-time-code workflows—the assistant explains that cpcv cannot answer the
 prompt and directs the customer to their normal SSH workflow without exposing
 or collecting a credential.
+
+Windows also has a Cloudflare-specific recovery adapter for early SSH failures.
+It recognizes a simple direct `cloudflared access ssh/tcp --hostname` proxy
+from the effective SSH configuration. Server-provided application metadata
+limits recovery to exact cache lock paths. Only legacy empty locks older than
+two minutes are eligible; nonempty locks, links/reparse points, unreadable
+process inventories, and potentially active authentication fail closed.
+An account-scoped mutex and a persisted ten-minute cooldown coordinate
+watchers and one-shot uploads. Existing SSH/proxy processes are never stopped.
+The normal Cloudflare CLI owns token refresh, and its JWT output never reaches
+logs or status. Recovery uses a separate failed-upload stage, so the next
+normal attempt rechecks the clipboard and keeps existing guardian deadlines.
+The status schema adds controlled `cloudflare-retry` and
+`cloudflare-sign-in-required` reasons. This adapter is Windows-specific;
+macOS retains its existing transport timeout, cleanup, and retry guarantees.
+
 The Windows tray also shows its bundled version and offers **Get latest
 version…**. That is an explicit handoff to a fixed official GitHub Releases
 URL; it never polls for, downloads, verifies, or runs a release asset. A person

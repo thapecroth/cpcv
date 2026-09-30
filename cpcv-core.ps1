@@ -1,6 +1,12 @@
 # Shared helpers for cpcv. Configuration is local-only; see
 # cpcv.config.example.psd1 and README.md.
 
+# A Windows PowerShell child launched by PowerShell 7 can inherit the newer
+# host's module search path. Load the native configuration reader explicitly.
+if ($PSVersionTable.PSVersion.Major -le 5 -and $env:OS -eq "Windows_NT") {
+    Import-Module (Join-Path $PSHOME "Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1") -ErrorAction Stop
+}
+
 $script:CpcvRoot = $PSScriptRoot
 $script:CpcvLocalAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE "AppData\Local" }
 $script:CpcvDefaultConfigPath = Join-Path $script:CpcvLocalAppData "cpcv\config.psd1"
@@ -476,6 +482,8 @@ function Save-CpcvConfig {
 
 $script:CpcvConfig = Get-CpcvConfig
 
+. (Join-Path $PSScriptRoot "cpcv-cloudflare-recovery.ps1")
+
 if (-not ("CpcvBoundedOutput" -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -648,6 +656,8 @@ function ConvertTo-CpcvUploadStatusReason {
         "ssh-mkdir-proxy-failed" { return "ssh-mkdir-proxy-failed" }
         "ssh-mkdir-remote-folder-failed" { return "ssh-mkdir-remote-folder-failed" }
         "ssh-mkdir-failed" { return "ssh-mkdir-failed" }
+        "cloudflare-retry" { return "cloudflare-retry" }
+        "cloudflare-sign-in-required" { return "cloudflare-sign-in-required" }
         "scp-timeout" { return "scp-timeout" }
         "scp-failed" { return "scp-failed" }
         "ssh-latest-timeout" { return "ssh-latest-timeout" }
@@ -1227,8 +1237,28 @@ function Invoke-CpcvClipboardUpload {
     if (-not $mkdir.Ok) {
         $detail = Protect-CpcvLogDetail $mkdir.Detail
         Write-CpcvLog "mkdir failed$($(if ($mkdir.TimedOut) { ' (timeout)' } else { '' })): $detail"
+        $reason = Get-CpcvSshMkdirFailureReason -ProcessResult $mkdir
+        # Recovery is a separate failed-upload stage. The next normal retry
+        # rechecks the clipboard and begins again, keeping the existing guardian
+        # deadline and avoiding publication of an image superseded during login.
+        try {
+            $recovery = Repair-CpcvCloudflareAccess -Config $cfg -FailureKind (Get-CpcvSshConnectionFailureKind -ProcessResult $mkdir)
+            if ($recovery.State -eq "recovered") {
+                $reason = "cloudflare-retry"
+                $detail = "Cloudflare sign-in was refreshed; the next upload attempt will retry automatically."
+            }
+            elseif ($recovery.State -eq "sign-in-required") {
+                $reason = "cloudflare-sign-in-required"
+                $detail = "Complete Cloudflare sign-in in your normal SSH workflow; cpcv will retry automatically."
+            }
+        }
+        catch {
+            # Recovery cannot obscure the original transport failure or expose
+            # private proxy configuration, token output, or helper exceptions.
+            Write-CpcvLog "Cloudflare Access recovery unavailable; normal upload retry preserved"
+        }
         Prune-CpcvCache -KeepPath $localFile
-        return @{ Ok = $false; Reason = (Get-CpcvSshMkdirFailureReason -ProcessResult $mkdir); Detail = $detail }
+        return @{ Ok = $false; Reason = $reason; Detail = $detail }
     }
 
     $scp = Invoke-CpcvProcess -FilePath "scp" -Arguments ($sshOpts + @($localFile, "${hostAlias}:$remoteDir/$base")) -Label "scp upload"
