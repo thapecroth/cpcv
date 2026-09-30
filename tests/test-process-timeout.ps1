@@ -17,6 +17,45 @@ Assert-Cpcv ($large.StdOut.Length -le $script:CpcvConfig.MaxCommandOutputBytes) 
 $redacted = Protect-CpcvLogDetail "Authorization: Bearer secret-value`nhttps://example.test/callback?token=super-secret"
 Assert-Cpcv ($redacted -notmatch 'secret-value|super-secret') "Credential-like subprocess text was not redacted for logging."
 Assert-Cpcv ((Get-CpcvRetryDelay 1 2) -eq 4 -and (Get-CpcvRetryDelay 8 2) -eq 60) "Failure retry backoff is not capped as expected."
+$bannerFailure = @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'Connection timed out during banner exchange'; Detail = 'synthetic banner timeout' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $bannerFailure) -eq 'connect-timeout') "A banner-exchange timeout was not classified as a controlled connection timeout."
+$authFailure = @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'Permission denied (publickey).'; Detail = '' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $authFailure) -eq 'authentication') "A non-interactive SSH sign-in failure was not classified safely."
+$interactiveAuthFailure = @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'Permission denied (publickey,keyboard-interactive).'; Detail = '' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $interactiveAuthFailure) -eq 'authentication') "An interactive/MFA-style SSH sign-in failure was not classified safely."
+$tooManyAuthFailures = @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'Received disconnect: Too many authentication failures'; Detail = '' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $tooManyAuthFailures) -eq 'authentication') "An SSH agent authentication-limit failure was not classified safely."
+$noAuthMethods = @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'No supported authentication methods available'; Detail = '' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $noAuthMethods) -eq 'authentication') "An unsupported SSH authentication-method failure was not classified safely."
+$remoteFolderPermission = @{ Ok = $false; TimedOut = $false; ExitCode = 1; StdOut = ''; StdErr = "mkdir: cannot create directory '/home/example/clipboard-images': Permission denied"; Detail = '' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $remoteFolderPermission) -ne 'authentication') "A remote-folder permission failure was incorrectly classified as SSH authentication."
+Assert-Cpcv ((Get-CpcvSshMkdirFailureReason -ProcessResult $remoteFolderPermission) -eq 'ssh-mkdir-remote-folder-failed') "A remote-folder permission failure was not given its own controlled status token."
+$authPresentation = Get-CpcvSshConnectionCheckPresentation -FailureKind 'authentication'
+Assert-Cpcv ($authPresentation.Detail -match 'one-time-code' -and $authPresentation.NextStep -match 'normal SSH workflow') "Authentication guidance did not explain an interactive or MFA-style sign-in safely."
+$hostKeyFailure = @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'Host key verification failed.'; Detail = '' }
+Assert-Cpcv ((Get-CpcvSshConnectionFailureKind -ProcessResult $hostKeyFailure) -eq 'host-key') "An SSH host-key failure was not classified safely."
+$sshOptions = @(Get-CpcvSshOptions)
+Assert-Cpcv (($sshOptions -join ' ') -eq '-o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=2') "The shared unattended SSH option set changed unexpectedly."
+
+# The separately owned tray helper must emit only a compact category, even
+# before a valid connection exists. Point its child process at an invalid local
+# config so this contract test cannot contact SSH or change remote state.
+$connectionHelper = Join-Path (Split-Path $PSScriptRoot -Parent) 'cpcv-connection-check.ps1'
+Assert-Cpcv (Test-Path -LiteralPath $connectionHelper -PathType Leaf) "The owned tray connection-check helper is missing."
+$helperConfigPath = Join-Path $env:TEMP ("cpcv-helper-config-{0}.psd1" -f [Guid]::NewGuid())
+$priorHelperConfig = $env:CPCV_CONFIG
+try {
+    [IO.File]::WriteAllText($helperConfigPath, "@{}`n", [Text.UTF8Encoding]::new($false))
+    $env:CPCV_CONFIG = $helperConfigPath
+    $helperOutput = @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $connectionHelper 2>&1 | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    Assert-Cpcv ($LASTEXITCODE -eq 0 -and $helperOutput.Count -eq 1) "The owned tray connection-check helper did not emit one controlled result."
+    $helperResult = $helperOutput[0] | ConvertFrom-Json -ErrorAction Stop
+    Assert-Cpcv ([string]$helperResult.Version -eq '1' -and [string]$helperResult.FailureKind -eq 'configuration') "The owned tray connection-check helper exposed an unexpected result category."
+}
+finally {
+    if ($null -eq $priorHelperConfig) { Remove-Item Env:CPCV_CONFIG -ErrorAction SilentlyContinue } else { $env:CPCV_CONFIG = $priorHelperConfig }
+    Remove-Item -LiteralPath $helperConfigPath -Force -ErrorAction SilentlyContinue
+}
 
 $validConfig = New-CpcvDefaultConfig
 $validConfig.HostAlias = "example-host"
@@ -115,6 +154,10 @@ try {
     $script:simulatedNetworkUp = $false
     function Invoke-CpcvProcess {
         param([string]$FilePath, [string[]]$Arguments, [int]$TimeoutSeconds, [string]$Label)
+        if ($Label -eq 'ssh connection check') {
+            $script:connectionCheckArguments = @($Arguments)
+            return @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ''; StdErr = 'Connection timed out during banner exchange'; Detail = 'https://example.test/callback?token=super-secret' }
+        }
         if (-not $script:simulatedNetworkUp) {
             return @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ""; StdErr = "simulated network failure"; Detail = "https://example.test/callback?token=super-secret" }
         }
@@ -127,6 +170,15 @@ try {
     $failedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
     Assert-Cpcv ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-failed") "A failed upload did not persist a controlled tray status."
     Assert-Cpcv ((Get-Content -Raw $script:CpcvConfig.UploadStatusFile) -notmatch 'super-secret|example-host|clipboard-images') "Upload status exposed diagnostic or configuration detail."
+
+    $stateBeforeConnectionCheck = Test-Path -LiteralPath $script:CpcvConfig.StateFile
+    $pathBeforeConnectionCheck = Test-Path -LiteralPath $script:CpcvConfig.LastRemotePathFile
+    $connectionCheck = Get-CpcvSshConnectionCheckResult
+    $connectionCheckText = "$($connectionCheck.Summary) $($connectionCheck.Detail) $($connectionCheck.NextStep)"
+    Assert-Cpcv (-not $connectionCheck.Ok -and $connectionCheck.FailureKind -eq 'connect-timeout') "The unattended SSH check did not map a banner timeout to a safe customer category."
+    Assert-Cpcv ($connectionCheckText -match 'unattended SSH' -and $connectionCheckText -notmatch 'super-secret|example-host|clipboard-images|example\.test') "The unattended SSH check exposed raw SSH or configuration data."
+    Assert-Cpcv ((@($script:connectionCheckArguments) -join ' ') -eq ' -o BatchMode=yes -o ConnectTimeout=8 -o ConnectionAttempts=1 -o ServerAliveInterval=3 -o ServerAliveCountMax=2 example-host true'.Trim()) "The unattended SSH check did not use the same unattended SSH settings and fixed read-only command."
+    Assert-Cpcv ((Test-Path -LiteralPath $script:CpcvConfig.StateFile) -eq $stateBeforeConnectionCheck -and (Test-Path -LiteralPath $script:CpcvConfig.LastRemotePathFile) -eq $pathBeforeConnectionCheck) "The unattended SSH check changed upload state."
 
     $script:simulatedNetworkUp = $true
     $recoveredUpload = Publish-ClipboardImage -Force

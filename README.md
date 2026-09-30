@@ -241,11 +241,17 @@ after your SSH configuration is ready. With Homebrew, use
 | macOS | The menu-bar icon shows a checkmark when healthy; it spins during upload and shows a warning when attention is needed. |
 
 On Windows, a yellow badged tray icon means cpcv's last upload was not
-confirmed. The hover text and **View status…** identify the safe failure stage
-(for example, a new background SSH connection timed out), retain the warning
-until a later upload succeeds, and offer a direct clipboard retry. A terminal
-SSH session can still work while a fresh non-interactive connection used by
-cpcv times out.
+confirmed. The hover text distinguishes a live local service from a remote
+connection problem: **Service running — SSH needs attention**. **View status…**
+identifies the safe failure stage and, for an early SSH failure, offers
+**Connection help…**. The assistant explains what happened without displaying
+your host, proxy, path, or raw SSH output; **Test unattended SSH** starts a
+new unattended cpcv process with the same no-prompt SSH settings cpcv uses and
+a read-only `true` command, so it does not upload an image or change remote
+files. It may honor an existing SSH multiplexing configuration, so it does not
+claim to force a new network handshake. When that check passes, use **Retry
+clipboard upload**. A terminal SSH session can still work while an unattended
+non-interactive connection used by cpcv times out.
 
 The configured shortcut inserts the remote path into that one tmux pane. It
 does not alter the host clipboard. Use **Copy latest path** from the tray or
@@ -273,8 +279,8 @@ server to run or account to create.
 
 | If this happens | Try this |
 | --- | --- |
-| Windows tray shows an upload warning | Open **View status…**. cpcv identifies whether the new SSH connection, SCP transfer, or `latest.png` confirmation failed, and retries automatically when it sees an image. Use **Retry clipboard upload** to try immediately, then **View recent activity…** for the redacted local diagnostic. |
-| Uploads are not completing | Verify `ssh image-box true`, then open the cpcv status view and check the private configuration. A working terminal session does not guarantee that every fresh background SSH/proxy connection will finish before cpcv's timeout. |
+| Windows tray shows **Service running — SSH needs attention** | Open **View status…** then **Connection help…**. Select **Test unattended SSH** first: it starts a new unattended cpcv process with the actual no-prompt SSH settings but makes no remote file changes. Follow the displayed next step, confirm the connection name in **Settings…**, and retry the clipboard image only after the test succeeds. |
+| Uploads are not completing | Open the cpcv status view. If the failure is at the first SSH step, use **Connection help…** rather than restarting the healthy local service. The assistant distinguishes an SSH greeting timeout, non-interactive sign-in, host-key protection, an unresolved connection name, a proxy/tunnel start, and remote-folder access. If sign-in requires a password, approval, security-key touch, or one-time code, complete it only in your normal SSH workflow; cpcv never asks for or stores that information. |
 | Your configured tmux shortcut does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"`. For the cross-platform choice, verify Windows forwards **Alt-V** as `M-v`; Warp may consume bare **Ctrl-V**. **Configure tmux path insertion…** in either desktop app can also check and reapply cpcv's remote integration. |
 | tmux says `no image` | Copy an image locally and wait for the first upload. |
 | You changed server or remote folder | Update **Settings…**, then use **Configure tmux path insertion…** in either desktop app or redeploy the remote tmux helper from a script. |

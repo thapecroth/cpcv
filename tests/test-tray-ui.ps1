@@ -18,7 +18,11 @@ Add-Type -AssemblyName System.Windows.Forms
 $script:trayUiAction = ''
 function Start-CpcvTrayUpload { $script:trayUiAction = 'upload' }
 function Start-CpcvTrayGuardian { $script:trayUiAction = 'start'; return $true }
-function Restart-CpcvTrayService { $script:trayUiAction = 'restart' }
+$script:trayUiRestartFails = $false
+function Restart-CpcvTrayService {
+    if ($script:trayUiRestartFails) { throw 'synthetic restart failure' }
+    $script:trayUiAction = 'restart'
+}
 function Open-CpcvTrayReleasePage { $script:trayUiAction = 'update' }
 function Show-CpcvTrayError { param([string]$Message) throw "Unexpected tray UI error: $Message" }
 function Get-CpcvTrayState { return $script:trayUiCurrentState }
@@ -28,6 +32,8 @@ function Invoke-CpcvTrayDialogProbe {
         [Parameter(Mandatory)]$State,
         [Parameter(Mandatory)][ValidateSet('upload', 'update', 'start', 'close')][string]$Action,
         [switch]$ExpectUploadDisabled,
+        [switch]$ExpectServiceDisabled,
+        [Nullable[bool]]$ExpectedConnectionVisible = $null,
         [string]$ExpectedUploadText = '',
         [string]$ExpectedServiceText = ''
     )
@@ -56,18 +62,30 @@ function Invoke-CpcvTrayDialogProbe {
             $script:trayUiProbeCompleted = $true
             $upload = @($form.Controls.Find('cpcvTrayUploadButton', $true)) | Select-Object -First 1
             $service = @($form.Controls.Find('cpcvTrayServiceButton', $true)) | Select-Object -First 1
+            $connection = @($form.Controls.Find('cpcvTrayConnectionHelpButton', $true)) | Select-Object -First 1
+            $actionFeedback = @($form.Controls.Find('cpcvTrayActionFeedback', $true)) | Select-Object -First 1
             $update = @($form.Controls.Find('cpcvTrayUpdateButton', $true)) | Select-Object -First 1
             $subtitle = @($form.Controls.Find('cpcvTraySubtitle', $true)) | Select-Object -First 1
             $banner = @($form.Controls.Find('cpcvTrayStatusBanner', $true)) | Select-Object -First 1
             $logo = @($form.Controls.Find('cpcvTrayBrandLogo', $true)) | Select-Object -First 1
             Assert-CpcvTrayUi ($null -ne $upload) 'Status dashboard did not construct the one-shot upload button.'
             Assert-CpcvTrayUi ($null -ne $service) 'Status dashboard did not construct the service action button.'
+            Assert-CpcvTrayUi ($null -ne $connection) 'Status dashboard did not construct the connection-assistant button.'
+            Assert-CpcvTrayUi ($null -ne $actionFeedback) 'Status dashboard did not construct its action guidance text.'
             Assert-CpcvTrayUi ($null -ne $update -and $update.Text -eq 'Get latest version...') 'Status dashboard did not construct its explicit update action.'
             Assert-CpcvTrayUi ($null -ne $subtitle -and $subtitle.Text -match 'Installed v[0-9]+\.[0-9]+\.[0-9]+') 'Status dashboard did not show the installed cpcv version.'
             Assert-CpcvTrayUi ($null -ne $banner) 'Status dashboard did not construct its health banner.'
             Assert-CpcvTrayUi ($null -ne $logo -and $null -ne $logo.Image) 'Status dashboard did not construct the branded logo.'
             if ($ExpectedUploadText) { Assert-CpcvTrayUi ($upload.Text -eq $ExpectedUploadText) "Status dashboard upload action was '$($upload.Text)', not '$ExpectedUploadText'." }
             if ($ExpectedServiceText) { Assert-CpcvTrayUi ($service.Text -eq $ExpectedServiceText) "Status dashboard service action was '$($service.Text)', not '$ExpectedServiceText'." }
+            if ($null -ne $ExpectedConnectionVisible) { Assert-CpcvTrayUi ($connection.Visible -eq [bool]$ExpectedConnectionVisible) "Status dashboard connection action visibility did not match the upload failure stage." }
+            if ($connection.Visible) {
+                $form.Width = $form.MinimumSize.Width
+                $form.PerformLayout()
+                Assert-CpcvTrayUi ($connection.Right -le $connection.Parent.ClientSize.Width) 'Connection help action is clipped at the dashboard minimum width.'
+                Assert-CpcvTrayUi ($actionFeedback.Left -ge $connection.Right -and $actionFeedback.Right -le $actionFeedback.Parent.ClientSize.Width) 'Connection guidance does not reflow beside the action at the dashboard minimum width.'
+            }
+            if ($ExpectServiceDisabled) { Assert-CpcvTrayUi (-not $service.Enabled) 'SSH upload failure left the local-service restart action enabled.' }
             if ($ExpectUploadDisabled) {
                 Assert-CpcvTrayUi (-not $upload.Enabled) 'Error-state dashboard left the upload action enabled.'
                 return
@@ -131,8 +149,104 @@ $retryState.IssueKind = 'Upload'
 $retryState.UploadFailureCount = 2
 $retryState.UploadFailureReason = 'ssh-mkdir-timeout'
 $retryState.Heartbeat = [pscustomobject]@{ ProcessId = 202; Status = 'idle failures=2'; FailureCount = 2 }
-Invoke-CpcvTrayDialogProbe -State $retryState -Action upload -ExpectedUploadText 'Retry clipboard upload' -ExpectedServiceText 'Restart service'
+Invoke-CpcvTrayDialogProbe -State $retryState -Action upload -ExpectedUploadText 'Retry clipboard upload' -ExpectedServiceText 'Service is running' -ExpectServiceDisabled -ExpectedConnectionVisible $true
 Assert-CpcvTrayUi ($script:trayUiAction -eq 'upload') 'Upload-retry dashboard did not invoke its protected retry action.'
+
+# Exercise the real connection assistant off-screen. Its connection check is
+# replaced with a controlled result so this test cannot contact SSH, change a
+# remote file, or touch the real clipboard.
+$script:trayUiConnectionCheckCount = 0
+$script:trayUiOriginalConnectionCheck = (Get-Command Get-CpcvSshConnectionCheckResult -CommandType Function).ScriptBlock
+$script:trayUiOriginalSettingsWindow = (Get-Command Show-CpcvTraySettingsWindow -CommandType Function).ScriptBlock
+function Get-CpcvSshConnectionCheckResult {
+    $script:trayUiConnectionCheckCount++
+    return [pscustomobject]@{
+        Ok = $true; FailureKind = 'connected'; Summary = 'Unattended SSH check passed'
+        Detail = 'cpcv started a new unattended SSH process using its upload settings and did not change any remote files.'
+        NextStep = 'Retry the clipboard upload.'
+    }
+}
+$script:trayUiConnectionSettingsCount = 0
+function Show-CpcvTraySettingsWindow {
+    $script:trayUiConnectionSettingsCount++
+    return $true
+}
+function Invoke-CpcvTrayConnectionAssistantProbe {
+    param([Parameter(Mandatory)]$State)
+
+    $script:trayUiConnectionDialogSeen = $false
+    $script:trayUiConnectionProbeFailure = ''
+    $script:trayUiConnectionProbeStage = 0
+    $script:trayUiAction = ''
+    $deadline = (Get-Date).AddSeconds(6)
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 100
+    $timer.Add_Tick({
+        $form = @([System.Windows.Forms.Application]::OpenForms | Where-Object { $_.Name -eq 'cpcvTrayConnectionHelpWindow' }) | Select-Object -First 1
+        if (-not $form) { return }
+        try {
+            if ((Get-Date) -gt $deadline) { throw 'Connection assistant probe exceeded its six-second deadline.' }
+            $script:trayUiConnectionDialogSeen = $true
+            $test = @($form.Controls.Find('cpcvTrayConnectionTestButton', $true)) | Select-Object -First 1
+            $settings = @($form.Controls.Find('cpcvTrayConnectionSettingsButton', $true)) | Select-Object -First 1
+            $retry = @($form.Controls.Find('cpcvTrayConnectionRetryButton', $true)) | Select-Object -First 1
+            $issue = @($form.Controls.Find('cpcvTrayConnectionHelpIssueDetail', $true)) | Select-Object -First 1
+            $resultTitle = @($form.Controls.Find('cpcvTrayConnectionCheckTitle', $true)) | Select-Object -First 1
+            $resultDetail = @($form.Controls.Find('cpcvTrayConnectionCheckDetail', $true)) | Select-Object -First 1
+            $support = @($form.Controls.Find('cpcvTrayConnectionSupportCode', $true)) | Select-Object -First 1
+            Assert-CpcvTrayUi ($null -ne $test -and $null -ne $settings -and $null -ne $retry -and $null -ne $issue -and $null -ne $resultTitle -and $null -ne $resultDetail -and $null -ne $support) 'Connection assistant did not construct its safe diagnostic controls.'
+            if ($script:trayUiConnectionProbeStage -eq 0) {
+                Assert-CpcvTrayUi ($issue.Text -match 'terminal session can still work') 'Connection assistant did not explain why an existing terminal session can differ from an unattended SSH check.'
+                Assert-CpcvTrayUi ($resultDetail.Text -match 'new unattended cpcv process' -and $resultDetail.Text -match 'does not use an open terminal process') 'Connection assistant did not accurately explain the unattended check boundary.'
+                Assert-CpcvTrayUi (-not $retry.Enabled) 'Connection assistant enabled upload retry before an unattended SSH check passed.'
+                Assert-CpcvTrayUi ($support.Text -match 'CPCV-SSH-COMMAND-TIMEOUT') 'Connection assistant did not expose a controlled support code.'
+                $script:trayUiConnectionProbeStage = 1
+                $test.PerformClick()
+                return
+            }
+            if ($script:trayUiConnectionProbeStage -eq 1) {
+                Assert-CpcvTrayUi ($script:trayUiConnectionCheckCount -eq 1) 'Connection assistant did not run exactly one safe connection check.'
+                Assert-CpcvTrayUi ($resultTitle.Text -match 'Unattended SSH check passed' -and $resultDetail.Text -match 'did not change any remote files') 'Connection assistant did not render the controlled check result.'
+                Assert-CpcvTrayUi $retry.Enabled 'Connection assistant did not enable retry after a successful unattended SSH check.'
+                $script:trayUiConnectionProbeStage = 2
+                $settings.PerformClick()
+                return
+            }
+            if ($script:trayUiConnectionProbeStage -eq 2) {
+                Assert-CpcvTrayUi ($script:trayUiConnectionSettingsCount -eq 1) 'Connection assistant did not open Settings after a successful check.'
+                Assert-CpcvTrayUi (-not $retry.Enabled) 'Connection assistant kept the old check valid after Settings saved a new connection configuration.'
+                Assert-CpcvTrayUi ($resultTitle.Text -match 'Settings saved' -and $resultDetail.Text -match 'Test unattended SSH again') 'Connection assistant did not require a new check after Settings changed.'
+                $script:trayUiConnectionProbeStage = 3
+                $test.PerformClick()
+                return
+            }
+            Assert-CpcvTrayUi ($script:trayUiConnectionCheckCount -eq 2) 'Connection assistant did not require a second safe check after Settings changed.'
+            Assert-CpcvTrayUi $retry.Enabled 'Connection assistant did not restore retry after the new unattended SSH check passed.'
+            $script:trayUiConnectionProbeStage = 4
+            $retry.PerformClick()
+            Assert-CpcvTrayUi ($script:trayUiAction -eq 'upload') 'Connection assistant retry did not invoke the protected one-shot upload action.'
+        }
+        catch {
+            $script:trayUiConnectionProbeFailure = $_.Exception.Message
+        }
+        finally {
+            if ($script:trayUiConnectionProbeStage -ge 4 -and -not $form.IsDisposed) { $form.Close() }
+        }
+    })
+    try {
+        $timer.Start()
+        Show-CpcvTrayConnectionHelpWindow -State $State -TestMode
+    }
+    finally {
+        $timer.Stop()
+        $timer.Dispose()
+    }
+    Assert-CpcvTrayUi $script:trayUiConnectionDialogSeen 'Connection assistant was not shown before the UI probe deadline.'
+    Assert-CpcvTrayUi ([string]::IsNullOrWhiteSpace($script:trayUiConnectionProbeFailure)) "Connection assistant probe failed: $($script:trayUiConnectionProbeFailure)"
+}
+Invoke-CpcvTrayConnectionAssistantProbe -State $retryState
+Set-Item -Path Function:\Get-CpcvSshConnectionCheckResult -Value $script:trayUiOriginalConnectionCheck
+Set-Item -Path Function:\Show-CpcvTraySettingsWindow -Value $script:trayUiOriginalSettingsWindow
 
 $stoppedState = $baseState.PSObject.Copy()
 $stoppedState.Level = 'Stopped'
@@ -229,6 +343,48 @@ Assert-CpcvTrayUi ($script:trayUiAction -eq 'restart') 'Settings window did not 
 Assert-CpcvTrayUi ($null -ne $script:trayUiSavedConfig -and $script:trayUiSavedConfig.Count -eq 13) 'Settings window did not submit exactly the persisted configuration fields.'
 Assert-CpcvTrayUi ($script:trayUiSavedConfig.HostAlias -eq 'saved-host') 'Settings window did not submit the edited SSH computer name.'
 Assert-CpcvTrayUi ($script:trayUiSavedConfig.RemoteDir -eq 'clipboard-images') 'Settings window unexpectedly changed an untouched remote folder.'
+
+$script:trayUiRestartFails = $true
+$script:trayUiSettingsRestartFailureSeen = $false
+$script:trayUiSettingsRestartFailureProbeFailure = ''
+$settingsRestartFailureDeadline = (Get-Date).AddSeconds(6)
+$settingsRestartFailureTimer = New-Object System.Windows.Forms.Timer
+$settingsRestartFailureTimer.Interval = 100
+$settingsRestartFailureTimer.Add_Tick({
+    $form = @([System.Windows.Forms.Application]::OpenForms | Where-Object { $_.Name -eq 'cpcvTraySettingsWindow' }) | Select-Object -First 1
+    if (-not $form) { return }
+    try {
+        if ((Get-Date) -gt $settingsRestartFailureDeadline) { throw 'Restart-failure Settings probe exceeded its six-second deadline.' }
+        $save = @($form.Controls.Find('cpcvTraySettingsSaveButton', $true)) | Select-Object -First 1
+        $close = @($form.Controls.Find('cpcvTraySettingsCloseButton', $true)) | Select-Object -First 1
+        $feedback = @($form.Controls.Find('cpcvTraySettingsFeedback', $true)) | Select-Object -First 1
+        Assert-CpcvTrayUi ($null -ne $save -and $null -ne $close -and $null -ne $feedback) 'Settings restart-failure probe could not find its controls.'
+        if (-not $script:trayUiSettingsRestartFailureSeen) {
+            $script:trayUiSettingsRestartFailureSeen = $true
+            $save.PerformClick()
+            return
+        }
+        Assert-CpcvTrayUi ($feedback.Text -match 'Settings were saved' -and $close.Text -eq 'Close') 'Settings did not clearly report a saved configuration after restart failed.'
+        $form.Close()
+    }
+    catch {
+        $script:trayUiSettingsRestartFailureProbeFailure = $_.Exception.Message
+        if (-not $form.IsDisposed) { $form.Close() }
+    }
+})
+$settingsSavedDespiteRestartFailure = $false
+try {
+    $settingsRestartFailureTimer.Start()
+    $settingsSavedDespiteRestartFailure = Show-CpcvTraySettingsWindow -TestMode
+}
+finally {
+    $settingsRestartFailureTimer.Stop()
+    $settingsRestartFailureTimer.Dispose()
+    $script:trayUiRestartFails = $false
+}
+Assert-CpcvTrayUi $script:trayUiSettingsRestartFailureSeen 'Settings restart-failure dialog was not shown before the UI probe deadline.'
+Assert-CpcvTrayUi ([string]::IsNullOrWhiteSpace($script:trayUiSettingsRestartFailureProbeFailure)) "Settings restart-failure probe failed: $($script:trayUiSettingsRestartFailureProbeFailure)"
+Assert-CpcvTrayUi $settingsSavedDespiteRestartFailure 'A saved configuration was not reported to the caller after the service restart failed.'
 
 $script:trayUiActivityReadCount = 0
 function Get-CpcvConfig { return [pscustomobject]@{ LogFile = (Join-Path $env:TEMP 'cpcv-tray-ui-activity\watch.log') } }
@@ -472,4 +628,4 @@ foreach ($jobId in @($script:trayUiTmuxAsyncJobIds)) {
     Assert-CpcvTrayUi ($null -eq (Get-Job -Id $jobId -ErrorAction SilentlyContinue)) 'Async tmux dialog left its completed background job behind.'
 }
 
-Write-Host 'PASS: STA WinForms status dialog constructed with synthetic state; upload/start buttons dispatched only to stubs; error state disabled upload; Settings saved the edited SSH computer name through the persistence helper and restarted the service; recent activity rendered protected text and refreshed; tmux path insertion checked and applied only explicit remote binding choices without restarting the local uploader; its production job path stays responsive and removes completed jobs.'
+Write-Host 'PASS: STA WinForms status dialog constructed with synthetic state; upload/start buttons dispatched only to stubs; error state disabled upload; a saved Settings change invalidated a prior SSH check until it was retested; Settings saved the edited SSH computer name through the persistence helper and restarted the service; recent activity rendered protected text and refreshed; tmux path insertion checked and applied only explicit remote binding choices without restarting the local uploader; its production job path stays responsive and removes completed jobs.'

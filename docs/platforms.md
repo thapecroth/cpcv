@@ -89,6 +89,21 @@ remote paths out of casual display; use **Copy latest path** when you need it.
 Its notification-area hover text and dashboard report the age of the last
 successful upload when the service is healthy, without revealing an SSH host or
 remote path.
+For an early SSH upload failure, the Windows hover text explicitly says that
+the **Service is running — SSH needs attention**, and the dashboard exposes
+**Connection help…** rather than presenting a local restart as the primary
+fix. The assistant uses only controlled diagnostic tokens (never raw SSH,
+proxy, host, path, or credential output), explains why an existing terminal
+session can differ from an unattended SSH process, and offers a read-only
+**Test unattended SSH**. That test starts a new process with the same fixed
+unattended SSH options as an upload and runs POSIX `true`; it does not copy an
+image or create/change a remote file. It may honor a user-configured SSH
+multiplexed transport, so it does not claim to force a new network handshake.
+A successful check proves the connection stage only, then enables a deliberate
+clipboard retry. For interactive authentication—including approval or
+one-time-code workflows—the assistant explains that cpcv cannot answer the
+prompt and directs the customer to their normal SSH workflow without exposing
+or collecting a credential.
 The Windows tray also shows its bundled version and offers **Get latest
 version…**. That is an explicit handoff to a fixed official GitHub Releases
 URL; it never polls for, downloads, verifies, or runs a release asset. A person

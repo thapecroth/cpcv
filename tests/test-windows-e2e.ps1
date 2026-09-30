@@ -49,6 +49,10 @@ public static class FakeOpenSsh {
         }
         Log(executable, args);
         string failure = Environment.GetEnvironmentVariable("CPCV_E2E_FAILURE") ?? "";
+        if (failure == "ssh-banner" && executable == "ssh.exe") {
+            Console.Error.WriteLine("Connection timed out during banner exchange https://example.test/callback?token=e2e-secret");
+            return 255;
+        }
         if (failure == executable || failure == "all") {
             Console.Error.WriteLine("simulated local transport failure");
             return 255;
@@ -154,6 +158,21 @@ public static class FakeOpenSsh {
     Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.LastRemotePathFile -Raw).Trim() -eq $recovered.RemotePath) "Recovered upload did not commit latest-path state."
     $recoveredUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
     Assert-CpcvE2E ($recoveredUploadStatus -and $recoveredUploadStatus.Result -eq "succeeded") "The isolated recovered upload did not clear its tray failure status."
+
+    # A realistic unattended-connection banner timeout must retain only its
+    # controlled diagnostic token. The fake stderr includes a secret-like URL
+    # solely to prove it cannot reach persistent status or customer UI state.
+    $script:e2eBytes = $script:e2eBytes + [byte]1
+    $env:CPCV_E2E_FAILURE = "ssh-banner"
+    $bannerFailed = Publish-ClipboardImage -Force
+    Assert-CpcvE2E (-not $bannerFailed.Ok -and $bannerFailed.Reason -eq "ssh-mkdir-connect-timeout") "A banner-exchange timeout was not classified as an early SSH connection failure."
+    $bannerStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
+    Assert-CpcvE2E ($bannerStatus -and $bannerStatus.Result -eq "failed" -and $bannerStatus.Reason -eq "ssh-mkdir-connect-timeout") "A banner-exchange timeout did not persist its controlled status token."
+    Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.UploadStatusFile -Raw) -notmatch 'e2e-secret|e2e-host|clipboard-images') "A banner-exchange failure exposed private transport or configuration data in status."
+    Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.LogFile -Raw) -notmatch 'e2e-secret') "A banner-exchange failure did not redact a secret-like transport URL in activity logging."
+    $env:CPCV_E2E_FAILURE = ""
+    $bannerRecovered = Publish-ClipboardImage -Force
+    Assert-CpcvE2E ($bannerRecovered.Ok -and $bannerRecovered.Reason -eq "uploaded") "The upload did not recover after the isolated banner-exchange timeout."
 }
 finally {
     $env:PATH = $originalPath

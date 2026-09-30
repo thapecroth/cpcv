@@ -83,6 +83,7 @@ foreach ($required in @(
     'Resolve-CpcvInnoCompiler',
     'Expand-Archive',
     'Test-CpcvExecutableHeader',
+    'cpcv-windows/cpcv-connection-check.ps1',
     'cpcv-windows/cpcv-remote.ps1',
     'show", "HEAD:VERSION',
     'CpcvOutputBaseName',

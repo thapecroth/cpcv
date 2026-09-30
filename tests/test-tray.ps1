@@ -50,10 +50,16 @@ Assert-CpcvTray ($traySource.Contains('tmux does not detect OS')) "Tray paired-s
 Assert-CpcvTray ($traySource.Contains('function Start-CpcvTrayTmuxRemoteJob') -and $traySource.Contains('Receive-CpcvTrayTmuxRemoteJob -Job $job')) "Tray tmux actions no longer leave the WinForms UI thread before waiting on remote commands."
 Assert-CpcvTray ($traySource.Contains('function Show-CpcvTrayRecentActivityWindow') -and $traySource.Contains('Get-CpcvTrayRecentActivityText')) "Tray no longer provides the bounded recent-activity window."
 Assert-CpcvTray ($traySource.Contains('cpcvTrayRecentActivityRefreshButton')) "Recent-activity window no longer exposes a refresh action."
+Assert-CpcvTray ($traySource.Contains('function Show-CpcvTrayConnectionHelpWindow') -and $traySource.Contains('cpcvTrayConnectionTestButton')) "Tray no longer provides a guided unattended-SSH connection assistant."
+Assert-CpcvTray ($traySource.Contains('function Start-CpcvTraySshConnectionCheckProcess') -and $traySource.Contains('cpcv-connection-check.ps1') -and $traySource.Contains('Stop-CpcvProcessTree')) "Tray connection assistant no longer owns and safely cancels its SSH helper process."
+Assert-CpcvTray ($traySource.Contains('Test unattended SSH') -and $traySource.Contains('one-time-code prompt')) "Tray connection assistant no longer explains unattended or MFA-style sign-in boundaries."
+Assert-CpcvTray ($traySource -match '(?s)\$restartItem\.Enabled = \(\$state\.Level -ne "Error" -and -not \$hasUploadIssue') "Tray menu still offers a misleading service restart during an SSH upload issue."
+Assert-CpcvTray ($traySource.Contains('cpcvTrayConnectionHelpButton') -and $traySource.Contains('Connection help...')) "Status dashboard no longer exposes the connection-specific recovery action."
 Assert-CpcvTray ($traySource.Contains('"Settings..."') -and $traySource.Contains('"View recent activity..."')) "Tray no longer labels the customer-facing settings and activity actions clearly."
 Assert-CpcvTray ($traySource -match '(?s)\$settingsButton\.Add_Click\(\{.*?Show-CpcvTraySettingsWindow') "Status dashboard Settings button is not wired to the Settings window."
 Assert-CpcvTray ($traySource -match '(?s)\$tmuxButton\.Add_Click\(\{.*?Show-CpcvTrayTmuxSetupWindow') "Status dashboard tmux button is not wired to the tmux path-insertion window."
 Assert-CpcvTray ($traySource -match '(?s)\$logButton\.Add_Click\(\{.*?Show-CpcvTrayRecentActivityWindow') "Status dashboard activity button is not wired to the recent-activity window."
+Assert-CpcvTray ($traySource -match '(?s)\$connectionButton\.Add_Click\(\{.*?Show-CpcvTrayConnectionHelpWindow') "Status dashboard connection button is not wired to the guided assistant."
 Assert-CpcvTray ($traySource -match '(?s)\$logItem\.Add_Click\(\{.*?Show-CpcvTrayRecentActivityWindow') "Tray activity menu item is not wired to the recent-activity window."
 Assert-CpcvTray ($traySource -match '(?s)\$configItem\.Add_Click\(\{.*?Show-CpcvTraySettingsWindow') "Tray Settings menu item is not wired to the Settings window."
 Assert-CpcvTray ($traySource -match '(?s)\$tmuxItem\.Add_Click\(\{.*?Show-CpcvTrayTmuxSetupWindow') "Tray tmux menu item is not wired to the tmux path-insertion window."
@@ -99,6 +105,69 @@ try {
 finally {
     Remove-Job -Job $tmuxCancelledJob -Force -ErrorAction SilentlyContinue
 }
+
+# The tray must render only an allowlisted helper token. Exercise the exact
+# bounded pipe/receiver contract with harmless local child PowerShells; no SSH
+# command, clipboard, settings, or remote file is touched.
+function Start-CpcvTrayTestConnectionProcess {
+    param([Parameter(Mandatory)][string]$Script)
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = 'powershell.exe'
+    $psi.Arguments = "-NoProfile -NonInteractive -EncodedCommand $encoded"
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
+    Assert-CpcvTray $process.Start() 'Synthetic tray connection-check process did not start.'
+    $stdoutSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList 4096
+    $stderrSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList 4096
+    return [pscustomobject]@{
+        Process = $process
+        StdOutSink = $stdoutSink
+        StdErrSink = $stderrSink
+        StdOutTask = $stdoutSink.PumpAsync($process.StandardOutput)
+        StdErrTask = $stderrSink.PumpAsync($process.StandardError)
+    }
+}
+
+$connectionOperation = Start-CpcvTrayTestConnectionProcess -Script '[Console]::Out.Write('' {"Version":1,"FailureKind":"connected"} ''.Trim())'
+try {
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        $connectionAsyncResult = Receive-CpcvTraySshConnectionCheckProcess -Operation $connectionOperation
+        if (-not $connectionAsyncResult.Completed) { Start-Sleep -Milliseconds 50 }
+    } while (-not $connectionAsyncResult.Completed -and (Get-Date) -lt $deadline)
+    Assert-CpcvTray ($connectionAsyncResult.Completed -and $connectionAsyncResult.Result.Ok -and $connectionAsyncResult.Result.FailureKind -eq 'connected') "Tray connection-check process completion was not collected safely."
+    Assert-CpcvTray ($null -eq $connectionOperation.Process) "Tray connection-check process was not disposed after completion."
+}
+finally {
+    Stop-CpcvTraySshConnectionCheckProcess -Operation $connectionOperation
+}
+
+$unsafeConnectionOperation = Start-CpcvTrayTestConnectionProcess -Script '[Console]::Error.Write("https://example.test/?token=synthetic-secret"); [Console]::Out.Write(''{"Version":1,"FailureKind":"connected"}'')'
+try {
+    $deadline = (Get-Date).AddSeconds(10)
+    do {
+        $unsafeConnectionResult = Receive-CpcvTraySshConnectionCheckProcess -Operation $unsafeConnectionOperation
+        if (-not $unsafeConnectionResult.Completed) { Start-Sleep -Milliseconds 50 }
+    } while (-not $unsafeConnectionResult.Completed -and (Get-Date) -lt $deadline)
+    $unsafeConnectionText = "$($unsafeConnectionResult.Result.Summary) $($unsafeConnectionResult.Result.Detail) $($unsafeConnectionResult.Result.NextStep)"
+    Assert-CpcvTray ($unsafeConnectionResult.Completed -and $unsafeConnectionResult.Result.FailureKind -eq 'check-unavailable') "Tray accepted a helper response with untrusted stderr."
+    Assert-CpcvTray ($unsafeConnectionText -notmatch 'synthetic-secret|example\.test') "Tray exposed untrusted helper output."
+}
+finally {
+    Stop-CpcvTraySshConnectionCheckProcess -Operation $unsafeConnectionOperation
+}
+
+$cancelledConnectionOperation = Start-CpcvTrayTestConnectionProcess -Script 'Start-Sleep -Seconds 30'
+$cancelledConnectionProcessId = $cancelledConnectionOperation.Process.Id
+Stop-CpcvTraySshConnectionCheckProcess -Operation $cancelledConnectionOperation
+Start-Sleep -Milliseconds 200
+Assert-CpcvTray ($null -eq $cancelledConnectionOperation.Process -and -not (Get-Process -Id $cancelledConnectionProcessId -ErrorAction SilentlyContinue)) "Cancelling the tray connection check left its owned process running."
 
 $healthyStyle = Get-CpcvTrayStatusStyle -Level "Healthy"
 $warningStyle = Get-CpcvTrayStatusStyle -Level "Warning"
@@ -273,7 +342,8 @@ if ((Get-CpcvConfig).HostAlias -ne 'session-host') { throw 'Runtime configuratio
             return [pscustomobject]@{ Available = $false; Processes = @(); Error = "simulated inspection failure" }
         }
         $fakeProcessId = if ($ScriptPath -match "guardian") { 1111 } else { 4242 }
-        return [pscustomobject]@{ Available = $true; Processes = @([pscustomobject]@{ ProcessId = $fakeProcessId }); Error = "" }
+        $processes = if ($script:trayProbeMode -eq "guardian-only" -and $ScriptPath -notmatch "guardian") { @() } else { @([pscustomobject]@{ ProcessId = $fakeProcessId }) }
+        return [pscustomobject]@{ Available = $true; Processes = $processes; Error = "" }
     }
 
     Set-CpcvAtomicText -Path $script:trayTestConfig.HeartbeatFile -Value ("{0} pid=4242 idle failures=0" -f (Get-Date).ToUniversalTime().ToString("o"))
@@ -287,14 +357,36 @@ if ((Get-CpcvConfig).HostAlias -ne 'session-host') { throw 'Runtime configuratio
     Assert-CpcvTray ($tooltip -match 'uploaded') "Healthy tray tooltip did not report the latest successful upload."
     Assert-CpcvTray ($tooltip -notmatch "example-host|clipboard-images") "NotifyIcon tooltip exposed local configuration/path details."
 
-    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=failed reason=ssh-mkdir-timeout" -f (Get-Date).ToUniversalTime().ToString("o"))
+    $script:trayProbeMode = "guardian-only"
+    $recovering = Get-CpcvTrayState
+    Assert-CpcvTray ($recovering.Level -eq "Warning" -and $recovering.IssueKind -eq "Service" -and $recovering.Summary -match "Automatic uploads are restarting" -and (Get-CpcvTrayGuidance -State $recovering) -match "Refresh status") "A guardian-only startup state did not explain that automatic uploads are recovering."
+    $script:trayProbeMode = "healthy"
+
+    Set-CpcvAtomicText -Path $script:trayTestConfig.UploadStatusFile -Value ("{0} result=failed reason=ssh-mkdir-connect-timeout" -f (Get-Date).ToUniversalTime().ToString("o"))
     $uploadFailure = Get-CpcvTrayState
     Assert-CpcvTray ($uploadFailure.Level -eq "Warning" -and $uploadFailure.IssueKind -eq "Upload") "A persisted upload failure was not surfaced as an upload-specific warning."
-    Assert-CpcvTray ($uploadFailure.Summary -match "SSH connection timed out") "A background SSH timeout did not receive a clear summary."
-    Assert-CpcvTray ($uploadFailure.Detail -match "terminal SSH session can still work") "The tray did not explain the difference between a fresh background SSH attempt and an interactive terminal session."
-    Assert-CpcvTray ((Get-CpcvTrayGuidance -State $uploadFailure) -match "Retry clipboard upload") "An upload warning did not offer the direct retry action."
+    Assert-CpcvTray ($uploadFailure.Summary -match "SSH upload connection timed out") "An unattended SSH timeout did not receive a clear summary."
+    Assert-CpcvTray ($uploadFailure.Detail -match "SSH greeting") "The tray did not expose the safe, actionable handshake stage."
+    Assert-CpcvTray (Test-CpcvTraySshConnectionIssue -State $uploadFailure) "An early SSH failure did not enable the connection-specific recovery path."
+    $connectionGuide = Get-CpcvTraySshTroubleshooting -State $uploadFailure
+    Assert-CpcvTray ($connectionGuide.Title -match "unattended SSH check" -and $connectionGuide.WhatHappened -match "terminal session can still work") "The tray did not explain the difference between an unattended SSH attempt and an interactive terminal session."
+    Assert-CpcvTray ($connectionGuide.Steps -match "Test unattended SSH" -and $connectionGuide.Steps -match "Retry clipboard upload") "The connection assistant did not provide a complete customer recovery path."
+    Assert-CpcvTray (("$($connectionGuide.Title) $($connectionGuide.Summary) $($connectionGuide.WhatHappened) $($connectionGuide.Steps) $($connectionGuide.SupportCode)") -notmatch "example-host|clipboard-images|/home/tester") "Connection guidance exposed private configuration or remote-path data."
+    Assert-CpcvTray ((Get-CpcvTrayGuidance -State $uploadFailure) -match "Connection help") "An SSH upload warning did not direct the customer to the guided connection action."
     $failureTooltip = Get-CpcvTrayTooltip -State $uploadFailure
-    Assert-CpcvTray ($failureTooltip.Length -le 63 -and $failureTooltip -notmatch "example-host|clipboard-images") "Upload-failure tooltip was not bounded and private."
+    Assert-CpcvTray ($failureTooltip -eq 'cpcv: Service running - SSH needs attention' -and $failureTooltip.Length -le 63 -and $failureTooltip -notmatch "example-host|clipboard-images") "Upload-failure tooltip was not bounded, private, and clear about local-service health."
+
+    $authFailure = $uploadFailure.PSObject.Copy()
+    $authFailure.UploadFailureReason = 'ssh-mkdir-auth-failed'
+    $authFailureGuide = Get-CpcvTraySshTroubleshooting -State $authFailure
+    Assert-CpcvTray ($authFailureGuide.Title -match 'sign-in' -and $authFailureGuide.WhatHappened -match 'one-time-code' -and $authFailureGuide.Steps -match 'never asks for, stores, or pastes a code') "The authentication walkthrough did not safely explain MFA-style prompts."
+
+    $remoteFolderIssue = Get-CpcvTrayUploadIssue -FailureReason 'ssh-mkdir-remote-folder-failed'
+    Assert-CpcvTray ($remoteFolderIssue.Summary -match 'Remote upload folder' -and $remoteFolderIssue.Detail -match 'reached the SSH target') "Remote upload-folder permission failures were not distinguished from sign-in failures."
+    $remoteFolderState = $uploadFailure.PSObject.Copy()
+    $remoteFolderState.UploadFailureReason = 'ssh-mkdir-remote-folder-failed'
+    Assert-CpcvTray (-not (Test-CpcvTraySshConnectionIssue -State $remoteFolderState)) "A remote upload-folder permission failure incorrectly opens the connection-only assistant."
+    Assert-CpcvTray ((Get-CpcvTrayGuidance -State $remoteFolderState) -match 'remote image folder') "A remote upload-folder permission failure did not direct the customer to the relevant setting or administrator."
 
     # Make state ordering explicit rather than relying on clock resolution: a
     # newer watcher retry must supersede an older confirmed one-shot upload,
@@ -345,4 +437,4 @@ $iconTest = Join-Path $PSScriptRoot 'test-tray-icon.ps1'
 & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $iconTest
 if ($LASTEXITCODE -ne 0) { throw "STA tray icon test failed with exit code $LASTEXITCODE." }
 
-Write-Host "PASS: branded tray icon loads and reaches the real NotifyIcon API; missing, corrupt, and oversized icon assets fail closed to the system fallback; tray no-run mode, customer-facing Settings/activity controls without Notepad, bounded redacted recent activity, bounded private tooltip, healthy/stale/mismatched heartbeat status, inspection fail-closed, configuration error status, and synthetic STA UI actions"
+Write-Host "PASS: branded tray icon loads and reaches the real NotifyIcon API; missing, corrupt, and oversized icon assets fail closed to the system fallback; tray no-run mode, customer-facing Settings/activity controls without Notepad, bounded redacted recent activity, private tooltip, service-recovery status, controlled SSH/MFA guidance, owned helper-process cancellation, healthy/stale/mismatched heartbeat status, inspection fail-closed, configuration error status, and synthetic STA UI actions"
