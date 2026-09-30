@@ -7,6 +7,8 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.7.0 - 2026-09-30
+
 ### Added
 
 - Windows **Connection help…** now provides a guided, privacy-safe recovery
