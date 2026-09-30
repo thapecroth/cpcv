@@ -7,6 +7,14 @@ fixes increment the patch version.
 
 ## Unreleased
 
+## v0.7.1 - 2026-09-30
+
+### Fixed
+
+- Windows tmux path-insertion status and setup now send generated multiline
+  SSH commands with POSIX LF line endings, preventing remote shell parse
+  errors caused by Windows CRLF checkouts.
+
 ## v0.7.0 - 2026-09-30
 
 ### Added

@@ -46,7 +46,14 @@ function Invoke-CpcvProcess {
         Label = $Label
     })
 
+    if ($FilePath -eq "ssh.exe") {
+        Assert-CpcvRemoteTmux (-not $Arguments[-1].Contains("`r")) "Remote SSH command retained a carriage return that can break POSIX shell syntax."
+    }
+
     switch ($Label) {
+        "ssh cpcv tmux line ending regression" {
+            return New-CpcvRemoteTmuxTestProcessResult
+        }
         "ssh cpcv tmux status" {
             switch ($script:remoteTmuxScenario) {
                 "state-collision" { return New-CpcvRemoteTmuxTestProcessResult -StdOut "CPCV_TMUX=installed`nCPCV_PLUGIN=installed`nCPCV_SERVER=running`nCPCV_OVERRIDE=none`nCPCV_BINDING=collision`n" }
@@ -93,6 +100,29 @@ function Reset-CpcvRemoteTmuxTestCalls {
 function Find-CpcvRemoteTmuxTestCall {
     param([Parameter(Mandatory)][string]$Label)
     return @($script:remoteTmuxCalls | Where-Object { $_.Label -eq $Label } | Select-Object -Last 1)[0]
+}
+
+# CRLF source checkouts and lone-CR input must produce the same POSIX command
+# as LF input. Preserve whitespace and SSH arguments outside the command.
+$posixCommand = "if true; then`n  printf 'ready\n'`n`nelif false; then`n  :`nfi`n"
+$lineEndingCommands = @(
+    $posixCommand.Replace("`n", "`r`n"),
+    $posixCommand.Replace("`n", "`r"),
+    $posixCommand
+)
+foreach ($lineEndingCommand in $lineEndingCommands) {
+    Reset-CpcvRemoteTmuxTestCalls
+    $lineEndingResult = Invoke-CpcvRemoteTmuxSsh -Config $script:remoteTmuxConfig -RemoteCommand $lineEndingCommand -Label "ssh cpcv tmux line ending regression"
+    Assert-CpcvRemoteTmux $lineEndingResult.Ok "Line-ending normalization changed the transport result."
+    Assert-CpcvRemoteTmux ($script:remoteTmuxCalls.Count -eq 1) "Line-ending normalization invoked more than one process."
+    $lineEndingCall = Find-CpcvRemoteTmuxTestCall -Label "ssh cpcv tmux line ending regression"
+    Assert-CpcvRemoteTmux ($lineEndingCall.Arguments[-1] -ceq $posixCommand) "Remote command normalization changed LF layout, indentation, blank lines, or shell text."
+    $expectedSshArguments = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ConnectionAttempts=1", "-o", "ServerAliveInterval=3", "-o", "ServerAliveCountMax=2", "safe-host")
+    Assert-CpcvRemoteTmux ($lineEndingCall.Arguments.Count -eq ($expectedSshArguments.Count + 1)) "Line-ending normalization changed the SSH argument count."
+    for ($argumentIndex = 0; $argumentIndex -lt $expectedSshArguments.Count; $argumentIndex++) {
+        Assert-CpcvRemoteTmux ($lineEndingCall.Arguments[$argumentIndex] -ceq $expectedSshArguments[$argumentIndex]) "Line-ending normalization changed the configured host or unattended SSH options."
+    }
+    Assert-CpcvRemoteTmux ($lineEndingCall.FilePath -eq "ssh.exe" -and $lineEndingCall.TimeoutSeconds -eq 35) "Line-ending normalization changed the SSH executable or command timeout."
 }
 
 # State reads only narrow markers and keeps the transport as individual args.
@@ -244,4 +274,4 @@ Assert-CpcvRemoteTmux ($crossPlatformApplied.Ok -and $crossPlatformApplied.Appli
 $crossPlatformApplyCall = Find-CpcvRemoteTmuxTestCall -Label "ssh cpcv tmux apply binding"
 Assert-CpcvRemoteTmux ($crossPlatformApplyCall.Arguments[-1] -match "table='root'" -and $crossPlatformApplyCall.Arguments[-1] -match "key='C-v'" -and $crossPlatformApplyCall.Arguments[-1] -match "secondary_table='root'" -and $crossPlatformApplyCall.Arguments[-1] -match "secondary_key='M-v'" -and $crossPlatformApplyCall.Arguments[-1] -match 'secondary_enabled=1') "Paired cross-platform apply did not verify both constrained binding slots."
 
-Write-Host "PASS: remote tmux state parsing, constrained staging/deployment, paired Windows Alt-V/macOS Ctrl-V bindings, cleanup, redaction, collision preflight, and non-disruptive default-server apply"
+Write-Host "PASS: CRLF/lone-CR remote command normalization with LF and SSH arguments preserved; remote tmux state parsing, constrained staging/deployment, paired Windows Alt-V/macOS Ctrl-V bindings, cleanup, redaction, collision preflight, and non-disruptive default-server apply"
