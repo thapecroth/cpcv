@@ -10,7 +10,7 @@ import CryptoKit
 import Darwin
 import Foundation
 
-private let cpcvVersion = "0.7.0"
+private let cpcvVersion = "0.7.1"
 private let maxStatusBytes = 65_536
 private let sshOptions = [
     "-o", "BatchMode=yes",

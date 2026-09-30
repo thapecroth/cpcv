@@ -262,6 +262,8 @@ Every platform implementation must preserve these guarantees:
   reuse a content-addressed image rather than creating unbounded files.
 - SSH arguments are passed as argument arrays. Configured hosts and paths are
   strictly validated before a remote shell sees the limited, generated command.
+- Windows tmux status and setup normalize generated multiline SSH commands to
+  POSIX LF line endings before sending them, including from CRLF checkouts.
 - Local state, cache, logs, locks, and build outputs are restricted to the
   current user where the operating system permits it.
 

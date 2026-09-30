@@ -54,6 +54,11 @@ it verifies that the core selects the fixed unattended SSH options without
 opening a network connection, changing upload state, or exposing raw diagnostic
 output.
 
+`tests/test-remote-tmux.ps1` captures SSH arguments without a network connection.
+It checks that CRLF and lone-CR commands become LF commands while existing LF
+layout, the configured target, unattended SSH options, and timeout stay intact.
+Captured status, install, and apply commands must contain no carriage returns.
+
 Build validation also extracts the portable archive into a path containing
 spaces and runs the Windows suite there. That catches quoting regressions in
 local PowerShell launcher paths before a user installs from a normal Downloads

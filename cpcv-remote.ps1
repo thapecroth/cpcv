@@ -169,8 +169,12 @@ function Invoke-CpcvRemoteTmuxSsh {
         [Parameter(Mandatory)][string]$Label
     )
 
+    # PowerShell here-strings inherit the source file's Windows line endings.
+    # POSIX shells can interpret a carriage return as part of an `if`/`elif`
+    # token, so normalize every command at the shared SSH transport boundary.
+    $posixCommand = $RemoteCommand.Replace("`r`n", "`n").Replace("`r", "`n")
     return Invoke-CpcvProcess -FilePath "ssh.exe" `
-        -Arguments ($script:CpcvRemoteTmuxSshOptions + @([string]$Config.HostAlias, $RemoteCommand)) `
+        -Arguments ($script:CpcvRemoteTmuxSshOptions + @([string]$Config.HostAlias, $posixCommand)) `
         -TimeoutSeconds ([int]$Config.CommandTimeoutSeconds) -Label $Label
 }
 
