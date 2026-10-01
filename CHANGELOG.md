@@ -27,6 +27,8 @@ fixes increment the patch version.
   expected acknowledgment; failed publication cannot advance local state.
 - Started subprocess trees are cleaned up if process/output handling raises
   an exception; timeout diagnostics retain bounded, redacted failure details.
+- Unattended Windows subprocesses receive closed standard input, and output
+  draining does not depend on a Windows Forms message loop.
 
 - Windows PowerShell startup explicitly loads its native configuration reader,
   including when the app inherits a PowerShell 7 module search path.

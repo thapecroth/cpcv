@@ -499,7 +499,9 @@ public sealed class CpcvBoundedOutput {
     public async Task PumpAsync(StreamReader reader) {
         char[] buffer = new char[4096];
         int count;
-        while ((count = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0) {
+        // Callers can synchronously wait on an STA/UI thread. Keep pipe reads
+        // off that caller's message loop so a full child pipe cannot deadlock.
+        while ((count = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0) {
             lock (text) {
                 int remaining = limit - text.Length;
                 if (remaining > 0) { text.Append(buffer, 0, Math.Min(remaining, count)); }
@@ -896,6 +898,7 @@ function Invoke-CpcvProcess {
     $psi.Arguments = (($Arguments | ForEach-Object { ConvertTo-CpcvCommandArgument $_ }) -join ' ')
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
 
@@ -905,6 +908,9 @@ function Invoke-CpcvProcess {
     try {
         if (-not $process.Start()) { throw "Process did not start" }
         $started = $true
+        # These unattended commands never consume input. Supply explicit EOF
+        # instead of inheriting a hidden watcher's console or open input pipe.
+        $process.StandardInput.Close()
         $limit = [int]$script:CpcvConfig.MaxCommandOutputBytes
         $stdoutSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
         $stderrSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))

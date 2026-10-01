@@ -291,6 +291,8 @@ contention persists. The status file carries the controlled `clipboard-busy`
 token. Retry waits sample only the Windows clipboard sequence number, wake
 promptly on a change, and maintain the watcher's existing PID-bound heartbeat.
 One-shot upload helpers do not replace that heartbeat with their own PID.
+Unattended Windows subprocesses have redirected, closed standard input and
+drain output independently of any Windows Forms synchronization context.
 The Windows remote finalization command returns a controlled acknowledgment
 only after updating the latest link; its expected image filename and path must
 match before successful local upload state is written.

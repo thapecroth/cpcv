@@ -9,6 +9,24 @@ function Assert-Cpcv([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
+$processProbeRoot = [IO.Path]::GetFullPath((Join-Path $env:TEMP ("cpcv-process-probes-{0}" -f [Guid]::NewGuid())))
+$processProbeBoundary = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+Assert-Cpcv ($processProbeRoot.StartsWith($processProbeBoundary, [StringComparison]::OrdinalIgnoreCase)) "Process probe directory is outside TEMP."
+$originalRuntimeConfig = $script:CpcvConfig
+try {
+    [void][IO.Directory]::CreateDirectory($processProbeRoot)
+    # Process timeouts log before the upload fixtures below are installed.
+    # Give every runtime path disposable state before starting the first child.
+    $script:CpcvConfig = New-CpcvDefaultConfig
+    $script:CpcvConfig.HostAlias = "process-test-host"
+    $script:CpcvConfig.DataRoot = $processProbeRoot
+    foreach ($entry in @{
+        LocalCache = "cache"; StateFile = "last-hash.txt"; LastRemotePathFile = "last-remote-path.txt"
+        UploadStatusFile = "upload-status.txt"; LogFile = "watch.log"; HeartbeatFile = "watch.heartbeat"
+    }.GetEnumerator()) {
+        $script:CpcvConfig[$entry.Key] = Join-Path $processProbeRoot $entry.Value
+    }
+
 $quick = Invoke-CpcvProcess -FilePath "powershell.exe" -Arguments @("-NoProfile", "-Command", "Write-Output healthy") -TimeoutSeconds 5 -Label "quick smoke test"
 Assert-Cpcv $quick.Ok "Quick process test failed: $($quick.Detail)"
 Assert-Cpcv ($quick.StdOut.Trim() -eq "healthy") "Quick process output was not captured."
@@ -44,7 +62,7 @@ Assert-Cpcv (($sshOptions -join ' ') -eq '-o BatchMode=yes -o ConnectTimeout=8 -
 # config so this contract test cannot contact SSH or change remote state.
 $connectionHelper = Join-Path (Split-Path $PSScriptRoot -Parent) 'cpcv-connection-check.ps1'
 Assert-Cpcv (Test-Path -LiteralPath $connectionHelper -PathType Leaf) "The owned tray connection-check helper is missing."
-$helperConfigPath = Join-Path $env:TEMP ("cpcv-helper-config-{0}.psd1" -f [Guid]::NewGuid())
+$helperConfigPath = Join-Path $processProbeRoot "helper-config.psd1"
 $priorHelperConfig = $env:CPCV_CONFIG
 try {
     [IO.File]::WriteAllText($helperConfigPath, "@{}`n", [Text.UTF8Encoding]::new($false))
@@ -72,7 +90,7 @@ Assert-Cpcv ((Test-CpcvConfigValue $badDir) -match "RemoteDir") "Traversal remot
 Assert-Cpcv (Test-CpcvRemotePath "/home/tester/clipboard-images/latest.png") "Safe remote path was rejected."
 Assert-Cpcv (-not (Test-CpcvRemotePath "/tmp/path;not-safe")) "Unsafe remote output path was accepted."
 
-$configProbe = Join-Path $env:TEMP ("cpcv-config-{0}.psd1" -f [Guid]::NewGuid())
+$configProbe = Join-Path $processProbeRoot "config-probe.psd1"
 $originalConfigPath = $script:CpcvConfigPath
 try {
     @'
@@ -104,13 +122,14 @@ finally {
 # A parent PowerShell starts a child PowerShell. The parent script uses an
 # explicit quoted command line so this check remains valid from a checkout
 # whose path contains spaces. The hard timeout must kill both processes.
-$childPidFile = Join-Path $env:TEMP ("cpcv-child-{0}.txt" -f [Guid]::NewGuid())
+$childPidFile = Join-Path $processProbeRoot "child-pid.txt"
 $childScript = Join-Path $PSScriptRoot "child-sleeper.ps1"
 $parentScript = Join-Path $PSScriptRoot "child-tree-parent.ps1"
 $timer = [Diagnostics.Stopwatch]::StartNew()
 $timeout = Invoke-CpcvProcess -FilePath "powershell.exe" -Arguments @("-NoProfile", "-File", $parentScript, "-ChildScript", $childScript, "-PidFile", $childPidFile) -TimeoutSeconds 3 -Label "process-tree timeout test"
 $timer.Stop()
 Assert-Cpcv $timeout.TimedOut "Expected process-tree command to time out."
+Assert-Cpcv ((Get-Content -LiteralPath $script:CpcvConfig.LogFile -Raw) -match 'process-tree timeout test') "The process timeout diagnostic was not written to disposable runtime state."
 Assert-Cpcv ($timer.Elapsed.TotalSeconds -lt 9) "Timeout took too long: $($timer.Elapsed.TotalSeconds)s"
 Start-Sleep -Milliseconds 500
 Assert-Cpcv (Test-Path $childPidFile) "Child process did not publish its PID; process-tree test did not run."
@@ -122,7 +141,7 @@ if (Get-Process -Id $childPid -ErrorAction SilentlyContinue) {
 Remove-Item -LiteralPath $childPidFile -Force
 
 # Simulate clipboard states and SSH outcomes without calling the network.
-$tempRoot = Join-Path $env:TEMP ("cpcv-test-{0}" -f [Guid]::NewGuid())
+$tempRoot = Join-Path $processProbeRoot "upload"
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 $originalConfig = $script:CpcvConfig
 try {
@@ -196,8 +215,14 @@ try {
 }
 finally {
     $script:CpcvConfig = $originalConfig
-    if (Test-Path $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
 }
 
 Write-Host "PASS: configuration validation, bounded/redacted output, retry backoff, process-tree timeout, clipboard states, SSH failure/recovery, and latest-image state"
 & (Join-Path $PSScriptRoot "test-release-hardening.ps1")
+}
+finally {
+    $script:CpcvConfig = $originalRuntimeConfig
+    $resolvedProbeRoot = [IO.Path]::GetFullPath($processProbeRoot)
+    Assert-Cpcv ($resolvedProbeRoot.StartsWith($processProbeBoundary, [StringComparison]::OrdinalIgnoreCase)) "Process probe cleanup escaped TEMP."
+    if (Test-Path -LiteralPath $resolvedProbeRoot) { Remove-Item -LiteralPath $resolvedProbeRoot -Recurse -Force }
+}
