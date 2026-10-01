@@ -2,6 +2,8 @@
 # stub all clipboard and SSH/SCP activity and write only beneath TEMP.
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\cpcv-core.ps1")
+$script:testHardeningMutexSuffix = [Guid]::NewGuid().ToString("N")
+function Get-CpcvMutexName { param([string]$Purpose) return "Local\CpcvHardeningTest-$Purpose-$script:testHardeningMutexSuffix" }
 
 function Assert-Cpcv([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -12,7 +14,7 @@ function New-CpcvTestProcessResult {
         [bool]$Ok = $true,
         [bool]$TimedOut = $false,
         [int]$ExitCode = 0,
-        [string]$StdOut = "/home/tester/clipboard-images/clip-test.png`n",
+        [string]$StdOut = "",
         [string]$Detail = ""
     )
     return @{ Ok = $Ok; TimedOut = $TimedOut; ExitCode = $ExitCode; StdOut = $StdOut; StdErr = ""; OutputTruncated = $false; Detail = $Detail }
@@ -171,7 +173,12 @@ https://example.test/callback?token=url-query-secret
         if ($script:simulatedScenario -eq "latest-failure" -and $Label -eq "ssh update latest") {
             return New-CpcvTestProcessResult -Ok:$false -ExitCode 255 -StdOut "" -Detail "client_secret=latest-secret"
         }
-        return New-CpcvTestProcessResult
+        $stdout = ""
+        if ($Label -eq "ssh update latest") {
+            $leaf = [regex]::Match($Arguments[-1], 'clip-[a-f0-9]{64}\.png').Value
+            $stdout = "CPCV_UPLOAD_OK /home/tester/clipboard-images/$leaf`n"
+        }
+        return New-CpcvTestProcessResult -StdOut $stdout
     }
 
     $script:currentClipboardBytes = [byte[]](137,80,78,71,13,10,26,10,1,2,3)

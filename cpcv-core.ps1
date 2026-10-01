@@ -499,7 +499,9 @@ public sealed class CpcvBoundedOutput {
     public async Task PumpAsync(StreamReader reader) {
         char[] buffer = new char[4096];
         int count;
-        while ((count = await reader.ReadAsync(buffer, 0, buffer.Length)) > 0) {
+        // Callers can synchronously wait on an STA/UI thread. Keep pipe reads
+        // off that caller's message loop so a full child pipe cannot deadlock.
+        while ((count = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0) {
             lock (text) {
                 int remaining = limit - text.Length;
                 if (remaining > 0) { text.Append(buffer, 0, Math.Min(remaining, count)); }
@@ -663,6 +665,7 @@ function ConvertTo-CpcvUploadStatusReason {
         "ssh-latest-timeout" { return "ssh-latest-timeout" }
         "ssh-latest-failed" { return "ssh-latest-failed" }
         "image-too-large" { return "image-too-large" }
+        "clipboard-busy" { return "clipboard-busy" }
         "configuration-invalid" { return "configuration-invalid" }
         "upload-error" { return "upload-error" }
         default { return "upload-failed" }
@@ -895,13 +898,19 @@ function Invoke-CpcvProcess {
     $psi.Arguments = (($Arguments | ForEach-Object { ConvertTo-CpcvCommandArgument $_ }) -join ' ')
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
 
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
+    $started = $false
     try {
         if (-not $process.Start()) { throw "Process did not start" }
+        $started = $true
+        # These unattended commands never consume input. Supply explicit EOF
+        # instead of inheriting a hidden watcher's console or open input pipe.
+        $process.StandardInput.Close()
         $limit = [int]$script:CpcvConfig.MaxCommandOutputBytes
         $stdoutSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
         $stderrSink = New-Object -TypeName CpcvBoundedOutput -ArgumentList ([Math]::Max(1024, $limit))
@@ -914,7 +923,14 @@ function Invoke-CpcvProcess {
             $stdoutTask.Wait(2000) | Out-Null
             $stderrTask.Wait(2000) | Out-Null
             Write-CpcvLog "command timed out after ${TimeoutSeconds}s ($Label), pid=$($process.Id); killed process tree"
-            return @{ Ok = $false; TimedOut = $true; ExitCode = $null; StdOut = $stdoutSink.Text; StdErr = $stderrSink.Text; OutputTruncated = ($stdoutSink.Truncated -or $stderrSink.Truncated); Detail = "Timed out after ${TimeoutSeconds}s; killed process tree." }
+            # Keep the useful connection/proxy diagnostic on a timeout without
+            # placing private subprocess output in the generic timeout log.
+            $detail = "Timed out after ${TimeoutSeconds}s; killed process tree."
+            $diagnostic = Protect-CpcvLogDetail (($stderrSink.Text, $stdoutSink.Text | Where-Object { $_ }) -join [Environment]::NewLine)
+            if ($diagnostic) { $detail += [Environment]::NewLine + $diagnostic }
+            $detailTruncated = $detail.Length -gt $limit
+            if ($detailTruncated) { $detail = $detail.Substring(0, $limit) }
+            return @{ Ok = $false; TimedOut = $true; ExitCode = $null; StdOut = $stdoutSink.Text; StdErr = $stderrSink.Text; OutputTruncated = ($stdoutSink.Truncated -or $stderrSink.Truncated -or $detailTruncated); Detail = $detail }
         }
 
         $process.WaitForExit()
@@ -926,12 +942,39 @@ function Invoke-CpcvProcess {
         return @{ Ok = ($process.ExitCode -eq 0); TimedOut = $false; ExitCode = $process.ExitCode; StdOut = $stdoutSink.Text; StdErr = $stderrSink.Text; OutputTruncated = $truncated; Detail = $detail }
     }
     catch {
-        return @{ Ok = $false; TimedOut = $false; ExitCode = $null; StdOut = ""; StdErr = ""; OutputTruncated = $false; Detail = "Could not start ${Label}: $_" }
+        $failure = Protect-CpcvLogDetail ([string]$_.Exception.Message)
+        # A failure in output capture or waiting can happen after Start succeeds.
+        # Do not leave that owned SSH/proxy tree behind while the watcher retries.
+        if ($started) {
+            try {
+                if (-not $process.HasExited) {
+                    Stop-CpcvProcessTree -ProcessId $process.Id
+                    [void]$process.WaitForExit(5000)
+                }
+            }
+            catch { }
+        }
+        return @{ Ok = $false; TimedOut = $false; ExitCode = $null; StdOut = ""; StdErr = ""; OutputTruncated = $false; Detail = "Could not $(if ($started) { 'complete' } else { 'start' }) ${Label}: $failure" }
     }
     finally { if ($process) { $process.Dispose() } }
 }
 
-function Get-ClipboardImageBytes {
+function Test-CpcvClipboardBusyException {
+    param([AllowNull()][System.Exception]$Exception)
+
+    # PowerShell wraps failures from static .NET calls. Match the specific
+    # Windows clipboard-open HRESULT, rather than a localized message or every
+    # ExternalException (which can also mean an image conversion failure).
+    for ($depth = 0; $null -ne $Exception -and $depth -lt 16; $depth++) {
+        if ($Exception -is [System.Runtime.InteropServices.ExternalException] -and $Exception.HResult -eq -2147221040) {
+            return $true # CLIPBRD_E_CANT_OPEN (0x800401D0)
+        }
+        $Exception = $Exception.InnerException
+    }
+    return $false
+}
+
+function Get-CpcvClipboardImageBytesOnce {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
     $img = [System.Windows.Forms.Clipboard]::GetImage()
@@ -939,6 +982,19 @@ function Get-ClipboardImageBytes {
     $ms = New-Object System.IO.MemoryStream
     try { $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); return $ms.ToArray() }
     finally { $ms.Dispose(); $img.Dispose() }
+}
+
+function Get-ClipboardImageBytes {
+    # Clipboard owners can briefly hold the clipboard while publishing a new
+    # screenshot. Add only two short waits; a persistent lock is retried by the
+    # watcher, without entering the transport-failure backoff.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try { return Get-CpcvClipboardImageBytesOnce }
+        catch {
+            if (-not (Test-CpcvClipboardBusyException -Exception $_.Exception) -or $attempt -eq 3) { throw }
+            Start-Sleep -Milliseconds 100
+        }
+    }
 }
 
 function Get-BytesHash {
@@ -953,12 +1009,12 @@ function Test-CpcvClipboardHash {
 
     # Checking again immediately before committing latest state keeps an upload
     # that was delayed by SSH from replacing a newer clipboard image (or text).
-    try {
-        $current = Get-ClipboardImageBytes
-        if ($null -eq $current -or $current.Length -eq 0) { return $false }
-        return ((Get-BytesHash -Bytes $current) -eq $ExpectedHash)
-    }
-    catch { return $false }
+    # An unavailable clipboard is not evidence that its contents changed.
+    # Propagate read failures to the uploader's controlled error contract while
+    # preserving the retry state and the user's clipboard.
+    $current = Get-ClipboardImageBytes
+    if ($null -eq $current -or $current.Length -eq 0) { return $false }
+    return ((Get-BytesHash -Bytes $current) -eq $ExpectedHash)
 }
 
 function Publish-ClipboardImage {
@@ -967,19 +1023,36 @@ function Publish-ClipboardImage {
     # A hotkey and the watcher can fire together. Serialize the whole upload so
     # they never race over local state or publish conflicting latest links.
     $mutex = New-Object System.Threading.Mutex($false, (Get-CpcvMutexName -Purpose "Upload"))
-    if (-not $mutex.WaitOne(0, $false)) { return @{ Ok = $false; Reason = "upload-in-progress"; Detail = "Another cpcv upload is active." } }
+    $acquired = $false
     try {
+        try { $acquired = $mutex.WaitOne(0, $false) }
+        catch [System.Threading.AbandonedMutexException] {
+            # Windows grants ownership when an earlier uploader died while
+            # holding the mutex. Recover that ownership and release it below.
+            $acquired = $true
+        }
+        if (-not $acquired) { return @{ Ok = $false; Reason = "upload-in-progress"; Detail = "Another cpcv upload is active." } }
         try {
             $result = Invoke-CpcvClipboardUpload -CopyPath:$CopyPath -Force:$Force
             Update-CpcvUploadStatusFromResult -UploadResult $result
             return $result
         }
         catch {
-            Set-CpcvUploadStatus -Result "failed" -Reason "upload-error"
-            throw
+            if (Test-CpcvClipboardBusyException -Exception $_.Exception) {
+                $result = @{ Ok = $false; Reason = "clipboard-busy"; Detail = "Windows clipboard is temporarily busy. cpcv will retry automatically without changing it." }
+            }
+            else {
+                Write-CpcvLog "upload error: $(Protect-CpcvLogDetail ([string]$_))"
+                $result = @{ Ok = $false; Reason = "upload-error"; Detail = "A local error prevented cpcv from confirming the upload. View recent activity for a redacted diagnostic; cpcv will retry automatically." }
+            }
+            Update-CpcvUploadStatusFromResult -UploadResult $result
+            return $result
         }
     }
-    finally { $mutex.ReleaseMutex() | Out-Null; $mutex.Dispose() }
+    finally {
+        try { if ($acquired) { $mutex.ReleaseMutex() | Out-Null } }
+        finally { $mutex.Dispose() }
+    }
 }
 
 function Get-CpcvSshOptions {
@@ -1198,6 +1271,58 @@ function Get-CpcvSshMkdirFailureReason {
     }
 }
 
+function Update-CpcvUploadHeartbeat {
+    # A tray/hotkey upload also uses this core. Only the watcher that already
+    # owns the health record may refresh it; writing another PID would make the
+    # guardian mistake a healthy watcher for a corrupt or duplicate service.
+    try {
+        $path = [string]$script:CpcvConfig.HeartbeatFile
+        if (-not $path) { return }
+        $heartbeat = Get-CpcvHeartbeatInfo -Path $path
+        if ($heartbeat -and $heartbeat.ProcessId -eq $PID) {
+            Update-CpcvHeartbeat -Status "checking"
+        }
+    }
+    catch { }
+}
+
+function Get-CpcvUploadTransportFailure {
+    param(
+        [Parameter(Mandatory)]$ProcessResult,
+        [Parameter(Mandatory)][string]$Reason,
+        [Parameter(Mandatory)][string]$Stage,
+        [string]$Hash = ""
+    )
+
+    $detail = Protect-CpcvLogDetail ([string]$ProcessResult.Detail)
+    Write-CpcvLog "$Stage failed$($(if ($ProcessResult.TimedOut) { ' (timeout)' } else { '' })): $detail"
+    $kind = Get-CpcvSshConnectionFailureKind -ProcessResult $ProcessResult
+    if ($kind -in @("command-timeout", "connect-timeout", "proxy", "authentication")) {
+        # Every transport stage starts a new SSH connection, so a later SCP or
+        # latest-link connection can need the same recovery as the initial mkdir.
+        # Leave publication/hash state alone and use the next ordinary attempt
+        # to recheck the clipboard after recovery, rather than retrying in place.
+        Update-CpcvUploadHeartbeat
+        try {
+            $recovery = Repair-CpcvCloudflareAccess -Config $script:CpcvConfig -FailureKind $kind
+            if ($recovery.State -eq "recovered") {
+                $Reason = "cloudflare-retry"
+                $detail = "Cloudflare sign-in was refreshed; the next upload attempt will retry automatically."
+            }
+            elseif ($recovery.State -eq "sign-in-required") {
+                $Reason = "cloudflare-sign-in-required"
+                $detail = "Complete Cloudflare sign-in in your normal SSH workflow; cpcv will retry automatically."
+            }
+        }
+        catch {
+            Write-CpcvLog "Cloudflare Access recovery unavailable; normal upload retry preserved"
+        }
+    }
+    $result = @{ Ok = $false; Reason = $Reason; Detail = $detail }
+    if ($Hash) { $result.Hash = $Hash }
+    return $result
+}
+
 function Invoke-CpcvClipboardUpload {
     param([switch]$CopyPath, [switch]$Force)
 
@@ -1233,40 +1358,22 @@ function Invoke-CpcvClipboardUpload {
     $base = [IO.Path]::GetFileName($localFile)
     $sshOpts = Get-CpcvSshOptions
 
+    Update-CpcvUploadHeartbeat
     $mkdir = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, "mkdir -p `$HOME/$remoteDir")) -Label "ssh mkdir"
     if (-not $mkdir.Ok) {
-        $detail = Protect-CpcvLogDetail $mkdir.Detail
-        Write-CpcvLog "mkdir failed$($(if ($mkdir.TimedOut) { ' (timeout)' } else { '' })): $detail"
         $reason = Get-CpcvSshMkdirFailureReason -ProcessResult $mkdir
-        # Recovery is a separate failed-upload stage. The next normal retry
-        # rechecks the clipboard and begins again, keeping the existing guardian
-        # deadline and avoiding publication of an image superseded during login.
-        try {
-            $recovery = Repair-CpcvCloudflareAccess -Config $cfg -FailureKind (Get-CpcvSshConnectionFailureKind -ProcessResult $mkdir)
-            if ($recovery.State -eq "recovered") {
-                $reason = "cloudflare-retry"
-                $detail = "Cloudflare sign-in was refreshed; the next upload attempt will retry automatically."
-            }
-            elseif ($recovery.State -eq "sign-in-required") {
-                $reason = "cloudflare-sign-in-required"
-                $detail = "Complete Cloudflare sign-in in your normal SSH workflow; cpcv will retry automatically."
-            }
-        }
-        catch {
-            # Recovery cannot obscure the original transport failure or expose
-            # private proxy configuration, token output, or helper exceptions.
-            Write-CpcvLog "Cloudflare Access recovery unavailable; normal upload retry preserved"
-        }
+        $failure = Get-CpcvUploadTransportFailure -ProcessResult $mkdir -Reason $reason -Stage "mkdir"
         Prune-CpcvCache -KeepPath $localFile
-        return @{ Ok = $false; Reason = $reason; Detail = $detail }
+        return $failure
     }
 
+    Update-CpcvUploadHeartbeat
     $scp = Invoke-CpcvProcess -FilePath "scp" -Arguments ($sshOpts + @($localFile, "${hostAlias}:$remoteDir/$base")) -Label "scp upload"
     if (-not $scp.Ok) {
-        $detail = Protect-CpcvLogDetail $scp.Detail
-        Write-CpcvLog "scp failed$($(if ($scp.TimedOut) { ' (timeout)' } else { '' })): $detail"
+        $reason = if ($scp.TimedOut) { "scp-timeout" } else { "scp-failed" }
+        $failure = Get-CpcvUploadTransportFailure -ProcessResult $scp -Reason $reason -Stage "scp"
         Prune-CpcvCache -KeepPath $localFile
-        return @{ Ok = $false; Reason = if ($scp.TimedOut) { "scp-timeout" } else { "scp-failed" }; Detail = $detail }
+        return $failure
     }
 
     if (-not (Test-CpcvClipboardHash -ExpectedHash $hash)) {
@@ -1276,19 +1383,28 @@ function Invoke-CpcvClipboardUpload {
         return @{ Ok = $false; Reason = "clipboard-changed"; Detail = $detail; Hash = $hash }
     }
 
-    $remoteCmd = "ln -sfn $base `$HOME/$remoteDir/latest.png; readlink -f `$HOME/$remoteDir/$base 2>/dev/null || printf '%s\n' `$HOME/$remoteDir/$base"
+    # Verify that latest really names this image before emitting the success
+    # marker. A failed ln or an existing directory at latest.png must not be
+    # hidden by a subsequent successful readlink/printf command.
+    # A server's home can contain Unicode even though configured/pasteable
+    # paths use a narrow alphabet. Keep verification, but have the remote shell
+    # emit the safe tilde path when its resolved home cannot be represented.
+    $remoteCmd = 'ln -sfn {0} "$HOME/{1}/latest.png" && test "$(readlink "$HOME/{1}/latest.png")" = "{0}" && {{ LC_ALL=C; export LC_ALL; cpcv_path=$(readlink -f "$HOME/{1}/{0}" 2>/dev/null) || cpcv_path="$HOME/{1}/{0}"; case "$cpcv_path" in /*) case "$cpcv_path" in *[!A-Za-z0-9._/-]*) cpcv_path="~/{1}/{0}" ;; esac ;; *) cpcv_path="~/{1}/{0}" ;; esac; printf ''CPCV_UPLOAD_OK %s\n'' "$cpcv_path"; }}' -f $base, $remoteDir
+    Update-CpcvUploadHeartbeat
     $remote = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, $remoteCmd)) -Label "ssh update latest"
     if (-not $remote.Ok) {
-        $detail = Protect-CpcvLogDetail $remote.Detail
-        Write-CpcvLog "latest-link update failed$($(if ($remote.TimedOut) { ' (timeout)' } else { '' })): $detail"
+        $reason = if ($remote.TimedOut) { "ssh-latest-timeout" } else { "ssh-latest-failed" }
+        $failure = Get-CpcvUploadTransportFailure -ProcessResult $remote -Reason $reason -Stage "latest-link update" -Hash $hash
         Prune-CpcvCache -KeepPath $localFile
-        return @{ Ok = $false; Reason = if ($remote.TimedOut) { "ssh-latest-timeout" } else { "ssh-latest-failed" }; Detail = $detail; Hash = $hash }
+        return $failure
     }
-    $remotePath = ($remote.StdOut -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1)
-    if ($remotePath) { $remotePath = $remotePath.Trim() }
-    if (-not (Test-CpcvRemotePath $remotePath)) {
-        if ($remotePath) { Write-CpcvLog "remote path response was invalid; using configured fallback" }
-        $remotePath = Get-CpcvRemotePath -LeafName $base
+    $acknowledgments = @(([string]$remote.StdOut -split "`r?`n") | Where-Object { $_ -cmatch '^CPCV_UPLOAD_OK ' })
+    $remotePath = if ($acknowledgments.Count -eq 1) { $acknowledgments[0].Substring(15).Trim() } else { "" }
+    if ($remote.OutputTruncated -or -not (Test-CpcvRemotePath $remotePath) -or [IO.Path]::GetFileName($remotePath) -cne $base) {
+        $detail = "The remote image publication could not be verified; leaving retry state unchanged."
+        Write-CpcvLog "latest-link update failed: $detail"
+        Prune-CpcvCache -KeepPath $localFile
+        return @{ Ok = $false; Reason = "ssh-latest-failed"; Detail = $detail; Hash = $hash }
     }
 
     if (-not (Test-CpcvClipboardHash -ExpectedHash $hash)) {

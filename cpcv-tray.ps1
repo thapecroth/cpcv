@@ -101,6 +101,12 @@ function Get-CpcvTrayUploadIssue {
     $retryDetail = "cpcv will retry automatically when it sees an image in the clipboard."
     $countDetail = if ($FailureCount -gt 1) { " $FailureCount attempts have failed." } elseif ($FailureCount -eq 1) { " One attempt has failed." } else { "" }
     switch ($FailureReason) {
+        "clipboard-busy" {
+            return [pscustomobject]@{
+                Summary = "Clipboard is temporarily busy"
+                Detail = "Another app is using the Windows clipboard. cpcv will read it again shortly; this is not an SSH upload failure. Keep the image in the clipboard until its upload is confirmed."
+            }
+        }
         "cloudflare-retry" {
             return [pscustomobject]@{
                 Summary = "Cloudflare connection recovered"
@@ -581,6 +587,9 @@ function Get-CpcvTrayGuidance {
         "Error" { return "Open settings, correct the local configuration, then start the service." }
         "Warning" {
             if (Test-CpcvTrayUploadIssue -State $State) {
+                if ([string]$State.UploadFailureReason -eq "clipboard-busy") {
+                    return "cpcv is retrying the clipboard automatically. Wait for the upload confirmation; you can keep using the service."
+                }
                 if (Test-CpcvTraySshConnectionIssue -State $State) {
                     return "The local service is running. Open Connection help to test an unattended SSH process, then retry the clipboard upload after it succeeds."
                 }

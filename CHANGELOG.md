@@ -17,6 +17,20 @@ fixes increment the patch version.
 
 ### Fixed
 
+- Windows clipboard contention receives bounded short retries and a specific
+  status message instead of being counted as a failed SSH upload.
+- Windows retry waits keep the watchdog heartbeat fresh and wake promptly
+  when clipboard content changes, so a new image does not wait behind an
+  older connection failure's backoff.
+- Cloudflare recovery is available after setup, transfer, and finalization
+  failures. Upload success requires a successful latest-link update and its
+  expected acknowledgment; failed publication cannot advance local state.
+  Remote home directories containing Unicode retain the safe tilde-path fallback.
+- Started subprocess trees are cleaned up if process/output handling raises
+  an exception; timeout diagnostics retain bounded, redacted failure details.
+- Unattended Windows subprocesses receive closed standard input, and output
+  draining does not depend on a Windows Forms message loop.
+
 - Windows PowerShell startup explicitly loads its native configuration reader,
   including when the app inherits a PowerShell 7 module search path.
 
