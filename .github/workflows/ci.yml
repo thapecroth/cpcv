@@ -87,7 +87,11 @@ jobs:
         shell: powershell
         run: |
           .\tests\test-process-timeout.ps1
+          .\tests\test-process-errors.ps1
           .\tests\test-cloudflare-recovery.ps1
+          .\tests\test-clipboard-recovery.ps1
+          .\tests\test-watcher-retry.ps1
+          .\tests\test-upload-recovery.ps1
           .\tests\test-windows-e2e.ps1
           .\tests\test-remote-tmux.ps1
           .\tests\test-tray.ps1

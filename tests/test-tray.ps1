@@ -9,6 +9,12 @@ function Assert-CpcvTray([bool]$Condition, [string]$Message) {
 
 $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root "cpcv-tray.ps1") -NoRun
+$busyIssue = Get-CpcvTrayUploadIssue -FailureReason 'clipboard-busy' -FailureCount 34
+Assert-CpcvTray ($busyIssue.Summary -eq 'Clipboard is temporarily busy') 'Clipboard contention was labeled as an upload or SSH failure.'
+Assert-CpcvTray ($busyIssue.Detail -notmatch '34 attempts|Connection help|Restart service') 'Clipboard contention carries misleading transport recovery guidance.'
+$busyState = [pscustomobject]@{ Level = 'Warning'; IssueKind = 'Upload'; UploadFailureReason = 'clipboard-busy' }
+Assert-CpcvTray ((Get-CpcvTrayGuidance -State $busyState) -match 'retrying the clipboard automatically') 'Clipboard contention guidance does not describe automatic recovery.'
+Assert-CpcvTray (-not (Test-CpcvTraySshConnectionIssue -State $busyState)) 'Clipboard contention starts an SSH troubleshooting flow.'
 Add-Type -AssemblyName System.Drawing
 $traySource = Get-Content -LiteralPath (Join-Path $root "cpcv-tray.ps1") -Raw
 Assert-CpcvTray ($traySource.Contains('$showStatusItem = $menu.Items.Add("View status...")')) "Tray menu no longer exposes a discoverable status action."

@@ -285,6 +285,16 @@ Every platform implementation must preserve these guarantees:
 
 ## Packaging boundary
 
+Windows retries clipboard-open contention separately from transport errors:
+three reads add at most two 100 ms waits, followed by normal polling when
+contention persists. The status file carries the controlled `clipboard-busy`
+token. Retry waits sample only the Windows clipboard sequence number, wake
+promptly on a change, and maintain the watcher's existing PID-bound heartbeat.
+One-shot upload helpers do not replace that heartbeat with their own PID.
+The Windows remote finalization command returns a controlled acknowledgment
+only after updating the latest link; its expected image filename and path must
+match before successful local upload state is written.
+
 GitHub Releases contain `SHA256SUMS.txt`, a transparent Windows PowerShell ZIP,
 a per-user Windows `Setup.exe`, and a macOS universal ZIP. The Setup EXE is an
 Inno Setup wizard installed under the current user's local app area; it does

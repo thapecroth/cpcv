@@ -254,7 +254,7 @@ clipboard upload**. A terminal SSH session can still work while an unattended
 non-interactive connection used by cpcv times out.
 
 On Windows, cpcv also detects stale Cloudflare Access login locks after an
-early SSH timeout or proxy/sign-in failure. For a simple `cloudflared access
+SSH timeout or proxy/sign-in failure during setup, transfer, or finalization. For a simple `cloudflared access
 ssh --hostname ...` proxy, it preserves active connections, moves only old,
 empty locks for that application to local recovery storage, and attempts the
 normal Cloudflare sign-in refresh. A successful refresh resumes uploads on
@@ -263,6 +263,15 @@ If browser sign-in still needs your input, the status view says **Cloudflare
 sign-in needs attention**. Complete that step in your normal SSH workflow.
 JWT tokens, SSH keys, and server identity checks are never rewritten by cpcv.
 Other proxies and newer nonempty Cloudflare lock formats use normal retries.
+
+Windows clipboard contention is retried briefly before returning **Clipboard
+is temporarily busy**. It uses the normal polling interval, without adding
+SSH retry backoff. Connection failures still use bounded backoff, but copying
+a new image wakes the watcher promptly. The watcher keeps its heartbeat fresh
+while waiting and between upload stages. Keep the image in the clipboard
+until the status view confirms its upload. An upload is confirmed only after
+the remote latest-link command succeeds and returns its expected acknowledgment;
+a failed finalization leaves the local successful-upload state unchanged.
 
 The configured shortcut inserts the remote path into that one tmux pane. It
 does not alter the host clipboard. Use **Copy latest path** from the tray or

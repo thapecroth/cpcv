@@ -12,6 +12,8 @@ function Assert-CpcvE2E([bool]$Condition, [string]$Message) {
 
 $root = Split-Path $PSScriptRoot -Parent
 . (Join-Path $root "cpcv-core.ps1")
+$script:testE2EMutexSuffix = [Guid]::NewGuid().ToString("N")
+function Get-CpcvMutexName { param([string]$Purpose) return "Local\CpcvE2ETest-$Purpose-$script:testE2EMutexSuffix" }
 
 $tempRoot = Join-Path $env:TEMP ("cpcv-e2e-{0}" -f [Guid]::NewGuid())
 $originalPath = $env:PATH
@@ -83,7 +85,7 @@ public static class FakeOpenSsh {
             string source = Path.Combine(directory, leaf);
             if (!File.Exists(source)) { return 68; }
             File.Copy(source, Path.Combine(directory, "latest.png"), true);
-            Console.WriteLine("/e2e-home/clipboard-images/" + leaf);
+            Console.WriteLine("CPCV_UPLOAD_OK /e2e-home/clipboard-images/" + leaf);
             return 0;
         }
         return 69;

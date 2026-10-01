@@ -26,6 +26,8 @@ try {
 
     $repositoryRoot = Split-Path $PSScriptRoot -Parent
     . (Join-Path $repositoryRoot 'cpcv-core.ps1')
+    $script:testCloudflareMutexSuffix = [Guid]::NewGuid().ToString('N')
+    function Get-CpcvMutexName { param([string]$Purpose) return "Local\CpcvCloudflareTest-$Purpose-$script:testCloudflareMutexSuffix" }
     . (Join-Path $repositoryRoot 'cpcv-cloudflare-recovery.ps1')
 
     $proxyWithAlias = ConvertFrom-CpcvCloudflareProxyCommand -ProxyCommand 'cloudflared access ssh --hostname %h' -ResolvedHostname 'images.example.test'
@@ -80,7 +82,12 @@ try {
                 return @{ Ok = $false; TimedOut = $true; ExitCode = -1; StdOut = ''; StdErr = ''; Detail = 'Authorization: Bearer synthetic-jwt-secret' }
             }
             Assert-Cpcv ($Label -in @('ssh mkdir', 'scp upload', 'ssh update latest')) 'Upload attempted an unexpected network operation.'
-            return @{ Ok = $true; TimedOut = $false; ExitCode = 0; StdOut = "/home/tester/clipboard-images/clip-synthetic.png`n"; StdErr = ''; Detail = '' }
+            $stdout = ''
+            if ($Label -eq 'ssh update latest') {
+                $leaf = [regex]::Match($Arguments[-1], 'clip-[a-f0-9]{64}\.png').Value
+                $stdout = "CPCV_UPLOAD_OK /home/tester/clipboard-images/$leaf`n"
+            }
+            return @{ Ok = $true; TimedOut = $false; ExitCode = 0; StdOut = $stdout; StdErr = ''; Detail = '' }
         }
         Assert-Cpcv ($FilePath -eq $script:fakeContext.Executable) 'Recovery launched an unexpected executable.'
         Assert-Cpcv (($Arguments -join ' ') -match '^access login ') 'Recovery attempted a command other than an ordinary Access login.'

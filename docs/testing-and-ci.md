@@ -83,6 +83,18 @@ its transient `.brew_home` is never copied into the package.
 
 ## Release CI
 
+The network-free Windows regression suite includes clipboard contention
+(`test-clipboard-recovery.ps1`), watcher retry timing and heartbeat maintenance
+(`test-watcher-retry.ps1`), and transport recovery at each upload stage plus
+remote finalization acknowledgment (`test-upload-recovery.ps1`). Process error
+tests (`test-process-errors.ps1`) verify bounded timeout diagnostics and cleanup
+when output capture fails after an owned process starts. These tests
+use synthetic clipboard, clock, process, and transport adapters. They cover
+exhausted and recovering locks, a newer image during retries, early wake from
+network backoff, malformed or missing publication confirmation, and failure
+paths that must preserve successful-upload state. Live clipboard and SSH
+verification is separate from CI and must restore any temporary test state.
+
 Pushing an annotated stable SemVer tag from `main` starts the release workflow.
 It validates the tag against `VERSION`, the native macOS source version, and a
 matching changelog heading; reruns the network-free test suites; builds the

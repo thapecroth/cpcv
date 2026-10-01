@@ -2,6 +2,8 @@
 # It never contacts an SSH host and writes only to a unique directory under TEMP.
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\cpcv-core.ps1")
+$script:testProcessMutexSuffix = [Guid]::NewGuid().ToString("N")
+function Get-CpcvMutexName { param([string]$Purpose) return "Local\CpcvProcessTest-$Purpose-$script:testProcessMutexSuffix" }
 
 function Assert-Cpcv([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -145,10 +147,9 @@ try {
     $noImage = Publish-ClipboardImage
     Assert-Cpcv ($noImage.Reason -eq "no-image") "No-image clipboard path was not handled."
 
-    function Get-ClipboardImageBytes { throw "simulated clipboard busy" }
-    $busyCaught = $false
-    try { Publish-ClipboardImage | Out-Null } catch { $busyCaught = $_.Exception.Message -match "simulated clipboard busy" }
-    Assert-Cpcv $busyCaught "Clipboard-busy error did not propagate for the watcher to log/retry."
+    function Get-ClipboardImageBytes { throw [System.Runtime.InteropServices.ExternalException]::new("simulated clipboard busy", -2147221040) }
+    $busy = Publish-ClipboardImage
+    Assert-Cpcv (-not $busy.Ok -and $busy.Reason -eq "clipboard-busy") "Clipboard contention did not return a controlled retry result."
 
     function Get-ClipboardImageBytes { return [byte[]](137,80,78,71,13,10,26,10,0,1,2,3) }
     $script:simulatedNetworkUp = $false
@@ -161,7 +162,12 @@ try {
         if (-not $script:simulatedNetworkUp) {
             return @{ Ok = $false; TimedOut = $false; ExitCode = 255; StdOut = ""; StdErr = "simulated network failure"; Detail = "https://example.test/callback?token=super-secret" }
         }
-        return @{ Ok = $true; TimedOut = $false; ExitCode = 0; StdOut = "/home/tester/clipboard-images/clip-test.png`n"; StdErr = ""; Detail = "" }
+        $stdout = ""
+        if ($Label -eq 'ssh update latest') {
+            $leaf = [regex]::Match($Arguments[-1], 'clip-[a-f0-9]{64}\.png').Value
+            $stdout = "CPCV_UPLOAD_OK /home/tester/clipboard-images/$leaf`n"
+        }
+        return @{ Ok = $true; TimedOut = $false; ExitCode = 0; StdOut = $stdout; StdErr = ""; Detail = "" }
     }
     $failedUpload = Publish-ClipboardImage -Force
     Assert-Cpcv ($failedUpload.Reason -eq "ssh-mkdir-failed") "Simulated SSH failure was not reported."

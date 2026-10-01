@@ -19,7 +19,9 @@ if ($CheckSeconds -lt 1 -or $CheckSeconds -gt 300 -or $StaleSeconds -lt $minimum
 }
 
 $mutex = New-Object System.Threading.Mutex($false, (Get-CpcvMutexName -Purpose "Guardian"))
-if (-not $mutex.WaitOne(0, $false)) { exit 0 }
+try { $ownsMutex = $mutex.WaitOne(0, $false) }
+catch [System.Threading.AbandonedMutexException] { $ownsMutex = $true }
+if (-not $ownsMutex) { $mutex.Dispose(); exit 0 }
 
 function Get-CpcvWatchProcess {
     $watchScript = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "cpcv-watch.ps1"))
