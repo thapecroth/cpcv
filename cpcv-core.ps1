@@ -1386,7 +1386,10 @@ function Invoke-CpcvClipboardUpload {
     # Verify that latest really names this image before emitting the success
     # marker. A failed ln or an existing directory at latest.png must not be
     # hidden by a subsequent successful readlink/printf command.
-    $remoteCmd = 'ln -sfn {0} "$HOME/{1}/latest.png" && test "$(readlink "$HOME/{1}/latest.png")" = "{0}" && {{ cpcv_path=$(readlink -f "$HOME/{1}/{0}" 2>/dev/null) || cpcv_path="$HOME/{1}/{0}"; printf ''CPCV_UPLOAD_OK %s\n'' "$cpcv_path"; }}' -f $base, $remoteDir
+    # A server's home can contain Unicode even though configured/pasteable
+    # paths use a narrow alphabet. Keep verification, but have the remote shell
+    # emit the safe tilde path when its resolved home cannot be represented.
+    $remoteCmd = 'ln -sfn {0} "$HOME/{1}/latest.png" && test "$(readlink "$HOME/{1}/latest.png")" = "{0}" && {{ LC_ALL=C; export LC_ALL; cpcv_path=$(readlink -f "$HOME/{1}/{0}" 2>/dev/null) || cpcv_path="$HOME/{1}/{0}"; case "$cpcv_path" in /*) case "$cpcv_path" in *[!A-Za-z0-9._/-]*) cpcv_path="~/{1}/{0}" ;; esac ;; *) cpcv_path="~/{1}/{0}" ;; esac; printf ''CPCV_UPLOAD_OK %s\n'' "$cpcv_path"; }}' -f $base, $remoteDir
     Update-CpcvUploadHeartbeat
     $remote = Invoke-CpcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, $remoteCmd)) -Label "ssh update latest"
     if (-not $remote.Ok) {

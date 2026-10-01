@@ -1,5 +1,7 @@
 # Network-free upload regression tests. SSH, SCP, Access recovery and clipboard
 # access are replaced before any upload; all state belongs to a unique TEMP root.
+param([string]$BashPath = "")
+
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\cpcv-core.ps1")
 
@@ -9,10 +11,56 @@ function Assert-CpcvUpload([bool]$Condition, [string]$Message) {
 
 $testRoot = Join-Path $env:TEMP ("cpcv-upload-recovery-{0}" -f [Guid]::NewGuid().ToString("N"))
 $originalConfig = $script:CpcvConfig
+$script:realUploadProcess = ${function:Invoke-CpcvProcess}
 $script:uploadBytes = [byte[]](137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3)
 $script:uploadStages = @("ssh mkdir", "scp upload", "ssh update latest")
 $script:uploadFailureReasons = @("ssh-mkdir-timeout", "scp-timeout", "ssh-latest-timeout")
 $script:uploadTestMutex = "Local\Cpcv-UploadTest-$([Guid]::NewGuid().ToString('N'))"
+$script:uploadTestBash = $BashPath
+if (-not $script:uploadTestBash) {
+    foreach ($gitRoot in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA "Programs"))) {
+        if (-not $gitRoot) { continue }
+        $candidate = Join-Path $gitRoot "Git\bin\bash.exe"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { $script:uploadTestBash = $candidate; break }
+    }
+}
+if ($script:uploadTestBash) {
+    Assert-CpcvUpload (Test-Path -LiteralPath $script:uploadTestBash -PathType Leaf) "The requested optional Bash fixture executable does not exist."
+}
+
+function ConvertTo-CpcvUploadShellLiteral {
+    param([string]$Value)
+    $singleQuote = [string][char]39
+    $doubleQuote = [string][char]34
+    $escapedQuote = "$singleQuote$doubleQuote$singleQuote$doubleQuote$singleQuote"
+    return ($singleQuote + $Value.Replace($singleQuote, $escapedQuote) + $singleQuote)
+}
+
+function Invoke-CpcvUploadShellFixture {
+    param([string]$Command, [string]$Mode, [string]$Base)
+    # The generated command uses a fixture-specific variable in place of HOME,
+    # leaving the actual user/process home and remote configuration untouched.
+    $fixtureHome = Join-Path $testRoot ("remote-home-" + [char]0x6D4B + [char]0x8BD5 + "-" + [Guid]::NewGuid().ToString("N"))
+    $fixtureImages = Join-Path $fixtureHome "clipboard-images"
+    [void][IO.Directory]::CreateDirectory($fixtureImages)
+    [IO.File]::WriteAllBytes((Join-Path $fixtureImages $Base), $script:uploadBytes)
+    if ($Mode -eq "failed-ln") { [void][IO.Directory]::CreateDirectory((Join-Path $fixtureImages "latest.png")) }
+    $fixtureCommand = "cd -- $(ConvertTo-CpcvUploadShellLiteral ($fixtureImages.Replace('\', '/'))) && CPCV_TEST_HOME=`$(dirname `"`$PWD`"); "
+    # Git Bash otherwise emulates ln -s by copying. Its system-link format
+    # preserves readlink semantics here without requiring Windows privileges;
+    # this setting belongs only to the newly owned fixture shell and children.
+    $fixtureCommand += 'MSYS=winsymlinks:sys; export MSYS; '
+    if ($Mode -eq "bsd-unicode-home") {
+        $fixtureCommand += 'readlink() { if [ "$1" = "-f" ]; then return 1; else command readlink "$@"; fi; }; '
+    }
+    elseif ($Mode -eq "ascii-resolved") {
+        $canonical = ConvertTo-CpcvUploadShellLiteral "/home/tester/clipboard-images/$Base"
+        $fixtureCommand += 'readlink() { if [ "$1" = "-f" ]; then printf ''%s\n'' ' + $canonical + '; else command readlink "$@"; fi; }; '
+    }
+    $fixtureCommand += $Command.Replace('$HOME', '$CPCV_TEST_HOME')
+    $script:uploadShellResult = & $script:realUploadProcess -FilePath $script:uploadTestBash -Arguments @("--noprofile", "--norc", "-c", $fixtureCommand) -TimeoutSeconds 5 -Label "local publication shell fixture"
+    return $script:uploadShellResult
+}
 
 function Get-ClipboardImageBytes { return $script:uploadBytes }
 function Get-CpcvMutexName { param([string]$Purpose) return "$script:uploadTestMutex-$Purpose" }
@@ -27,11 +75,16 @@ function Invoke-CpcvProcess {
     if ($Label -eq "ssh update latest") {
         $hash = Get-BytesHash -Bytes $script:uploadBytes
         $marker = "CPCV_UPLOAD_OK /home/tester/clipboard-images/clip-$hash.png"
+        if ($script:uploadAckMode -in @("unicode-home", "bsd-unicode-home", "ascii-resolved", "failed-ln")) {
+            return (Invoke-CpcvUploadShellFixture -Command $Arguments[-1] -Mode $script:uploadAckMode -Base "clip-$hash.png")
+        }
         switch ($script:uploadAckMode) {
             "missing" { $output = "/home/tester/clipboard-images/clip-$hash.png`n" }
             "duplicate" { $output = "$marker`n$marker`n" }
             "unsafe" { $output = "CPCV_UPLOAD_OK /tmp/path;unsafe`n" }
             "wrong-image" { $output = "CPCV_UPLOAD_OK /home/tester/clipboard-images/clip-other.png`n" }
+            "tilde" { $output = "CPCV_UPLOAD_OK ~/clipboard-images/clip-$hash.png`n" }
+            "raw-unicode" { $output = "CPCV_UPLOAD_OK /home/$([char]0x6D4B)$([char]0x8BD5)/clipboard-images/clip-$hash.png`n" }
             default { $output = "synthetic SSH banner`n$marker`n" }
         }
     }
@@ -109,7 +162,7 @@ try {
         Assert-CpcvUploadStateUncommitted
     }
 
-    foreach ($ackMode in @("missing", "duplicate", "unsafe", "wrong-image", "truncated")) {
+    foreach ($ackMode in @("missing", "duplicate", "unsafe", "wrong-image", "truncated", "raw-unicode")) {
         Reset-CpcvUploadTest
         $script:uploadAckMode = $ackMode
         $result = Publish-ClipboardImage -Force
@@ -128,6 +181,32 @@ try {
     Assert-CpcvUpload ($finalCommand -match '^ln -sfn .+ && test ' -and $finalCommand -match 'CPCV_UPLOAD_OK') "The remote publication command did not condition acknowledgment on a verified latest link."
 
     Reset-CpcvUploadTest
+    $script:uploadAckMode = "tilde"
+    $fallback = Publish-ClipboardImage -Force
+    $expectedFallback = "~/clipboard-images/clip-$(Get-BytesHash -Bytes $script:uploadBytes).png"
+    Assert-CpcvUpload ($fallback.Ok -and $fallback.RemotePath -ceq $expectedFallback) "A verified safe tilde path was not accepted for a home outside the path alphabet."
+    Assert-CpcvUpload ((Get-Content -LiteralPath $script:CpcvConfig.LastRemotePathFile -Raw).Trim() -ceq $expectedFallback) "A verified fallback path was not persisted after publication."
+
+    if ($script:uploadTestBash) {
+        foreach ($mode in @("unicode-home", "bsd-unicode-home", "ascii-resolved", "failed-ln")) {
+            Reset-CpcvUploadTest
+            $script:uploadAckMode = $mode
+            $fixtureResult = Publish-ClipboardImage -Force
+            if ($mode -eq "failed-ln") {
+                Assert-CpcvUpload (-not $fixtureResult.Ok -and $fixtureResult.Reason -eq "ssh-latest-failed") "An actual failed latest-link command emitted or accepted a success acknowledgment."
+                Assert-CpcvUploadStateUncommitted
+            }
+            else {
+                $expectedPath = if ($mode -eq "ascii-resolved") { "/home/tester/clipboard-images/clip-$(Get-BytesHash -Bytes $script:uploadBytes).png" } else { $expectedFallback }
+                Assert-CpcvUpload ($fixtureResult.Ok -and $fixtureResult.RemotePath -ceq $expectedPath) "The generated remote command selected the wrong path for $mode ($($fixtureResult.Reason)): $($script:uploadShellResult.Detail)"
+                Assert-CpcvUpload ((Get-Content -LiteralPath $script:CpcvConfig.LastRemotePathFile -Raw).Trim() -ceq $expectedPath) "The generated remote command did not commit its verified path for $mode."
+            }
+        }
+        Write-Host "PASS: generated remote command with an isolated Unicode home, BSD readlink fallback, ASCII canonical path, and failed latest-link publication"
+    }
+    else { Write-Host "SKIP: optional generated-command shell fixtures; Git Bash is unavailable (use -BashPath to provide it)." }
+
+    Reset-CpcvUploadTest
     $foreignHeartbeat = ([datetime]::UtcNow.AddSeconds(-5).ToString("o")) + " pid=$($PID + 1000) checking"
     Set-CpcvAtomicText -Path $script:CpcvConfig.HeartbeatFile -Value $foreignHeartbeat
     $healthy = Publish-ClipboardImage -Force
@@ -137,5 +216,10 @@ try {
 }
 finally {
     $script:CpcvConfig = $originalConfig
-    if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
+    $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
+    $resolvedTempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
+    if (-not $resolvedTestRoot.StartsWith($resolvedTempRoot, [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($resolvedTestRoot) -notmatch '^cpcv-upload-recovery-[a-f0-9]{32}$') {
+        throw "Refusing to remove an upload-recovery fixture outside its generated TEMP directory."
+    }
+    if (Test-Path -LiteralPath $resolvedTestRoot) { Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force }
 }

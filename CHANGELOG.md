@@ -25,6 +25,7 @@ fixes increment the patch version.
 - Cloudflare recovery is available after setup, transfer, and finalization
   failures. Upload success requires a successful latest-link update and its
   expected acknowledgment; failed publication cannot advance local state.
+  Remote home directories containing Unicode retain the safe tilde-path fallback.
 - Started subprocess trees are cleaned up if process/output handling raises
   an exception; timeout diagnostics retain bounded, redacted failure details.
 - Unattended Windows subprocesses receive closed standard input, and output
