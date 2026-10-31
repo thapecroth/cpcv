@@ -10,6 +10,10 @@ replacement screenshot app, or an administrator-installed background service.
 | Windows 10/11 | PowerShell watcher and guardian | Current-user Startup shortcut | Optional WinForms notification-area app |
 | macOS 11+ | Native Swift/AppKit watcher and guardian | Current-user GUI LaunchAgent | Optional native menu-bar app |
 
+Remote pane-specific path insertion supports tmux and
+[Herdr](herdr.md). Herdr uses an optional Python 3.8+ helper on the POSIX SSH
+target, configured with a Herdr command binding; it does not require tmux.
+
 Both clients observe images already placed on the platform clipboard, then use
 the system OpenSSH `ssh` and `scp` clients to upload to a generic SSH alias,
 hostname, or `user@host`. Neither client captures the screen itself.

@@ -13,6 +13,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-herdr:
+    name: Herdr remote integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check helper and deployment without SSH or clipboard access
+        run: |
+          bash -n deploy-herdr.sh
+          PYTHONDONTWRITEBYTECODE=1 python3 tests/test-herdr.py -v
+
   test-windows:
     name: Windows PowerShell
     runs-on: windows-2022

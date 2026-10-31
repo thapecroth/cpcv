@@ -19,6 +19,7 @@ class Cpcv < Formula
       "cpcv" => libexec/"macos/cpcv-macos-ctl.sh",
       "cpcv-setup" => libexec/"macos/cpcv-homebrew-setup.sh",
       "cpcv-deploy-tmux" => libexec/"macos/deploy-remote-tmux-cpcv-plugin.sh",
+      "cpcv-deploy-herdr" => libexec/"deploy-herdr.sh",
     }
     wrappers.each do |name, target|
       odie "cpcv release archive is missing #{target.basename}" unless target.executable?
@@ -41,6 +42,11 @@ class Cpcv < Formula
 
       The remote helper never edits ~/.tmux.conf. Add its printed run-shell line
       yourself, then reload tmux.
+
+      For Herdr instead (requires Python 3.8+ on the SSH target):
+        cpcv-deploy-herdr --host image-box
+      Add the printed command binding to the remote Herdr configuration and
+      run herdr server reload-config in that session.
     EOS
   end
 
