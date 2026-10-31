@@ -34,3 +34,6 @@ macos/build/
 
 # Reproducible local Windows source archives from build-windows.ps1.
 build/
+
+# Optional Herdr helper and its local test imports.
+__pycache__/

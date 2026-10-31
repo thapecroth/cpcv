@@ -15,8 +15,8 @@ the macOS job must not read a real system clipboard.
 | Network | A compiled temporary fake `ssh.exe`/`scp.exe` exercises mkdir → copy → latest, failure, and recovery without a host | No SSH, `launchctl`, or clipboard calls in `macos/test-macos.sh` |
 | Cloudflare recovery | Temporary cache files and fake discovery, HTTP, and process adapters verify old-lock cleanup, active-login preservation, cooldown, bounded refresh, and token-output privacy | Windows-specific adapter; native transport guarantees are unchanged |
 
-The CI workflow runs Windows and `macos-latest` jobs. The native macOS test
-entry point is:
+The CI workflow runs Windows, `macos-latest`, and an Ubuntu Herdr-helper job.
+The native macOS test entry point is:
 
 ```bash
 bash macos/test-macos.sh
@@ -26,6 +26,38 @@ bash tests/test-tmux-cpcv.sh
 It requires macOS 11 or newer and Xcode Command Line Tools. It compiles
 disposable uploader and tray binaries on every run, then runs only their
 network-free self-tests.
+
+The optional [Herdr integration](herdr.md) has separate checks that run on
+Linux or macOS with Python 3.8+:
+
+```bash
+bash -n deploy-herdr.sh
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test-herdr.py -v
+```
+
+These tests use synthetic image files, temporary home directories, a real
+local Unix socket with a fake Herdr protocol peer, and fake SSH/SCP commands.
+They check originating-pane and named-session targeting, the no-Enter input
+request, notification-only missing-image failures, bounded replies/timeouts,
+malformed acknowledgments, installation ownership/permissions, path escapes,
+and staging cleanup after deployment failures. They do not establish a live
+Herdr terminal or coding-agent attachment result. The input request was
+checked against Herdr v0.9.5's API source.
+
+For an opt-in live protocol check, supply an existing Herdr binary:
+
+```bash
+python3 tests/test-herdr-live.py --herdr-binary /path/to/herdr
+```
+
+This starts a disposable headless named session with a temporary home and
+raw capture terminals, then stops that server. It checks the actual paste
+bytes with bracketed-paste mode enabled and disabled, no Enter, and no input
+in a later focused pane. A real terminal client also exercises the documented
+prefix then Alt-V keybinding and Herdr's supplied command context. It does
+not install Herdr or use an existing session,
+real clipboard, SSH connection, or coding-agent account.
+
 An authorized live SSH upload is valuable additional evidence, but must be
 recorded separately and never described as a CI result unless it actually ran.
 

@@ -34,6 +34,7 @@ for required in \
   '__MACOS_SHA256__' \
   'cpcv-setup' \
   'cpcv-deploy-tmux' \
+  'cpcv-deploy-herdr' \
   'self-test'; do
   /usr/bin/grep -Fq -- "$required" "$template" || die "Formula template is missing: $required"
 done
@@ -69,6 +70,8 @@ if command -v brew >/dev/null 2>&1 && command -v zip >/dev/null 2>&1; then
     printf '%s\n' '#!/bin/sh' 'exit 0' > "$target_path"
     /bin/chmod 755 "$target_path"
   done
+  printf '%s\n' '#!/bin/sh' 'exit 0' > "$fixture_root/cpcv/deploy-herdr.sh"
+  /bin/chmod 755 "$fixture_root/cpcv/deploy-herdr.sh"
   (
     cd "$fixture_root"
     zip -q -r "$fixture_archive" cpcv
@@ -95,7 +98,7 @@ Dir.mktmpdir("cpcv-homebrew-stage") do |stage|
         formula.buildpath = buildpath
         formula.install
 
-        %w[cpcv cpcv-setup cpcv-deploy-tmux].each do |name|
+        %w[cpcv cpcv-setup cpcv-deploy-tmux cpcv-deploy-herdr].each do |name|
           wrapper = prefix/"bin"/name
           raise "missing executable wrapper: #{name}" unless wrapper.executable?
           raise "wrapper failed: #{name}" unless system(wrapper, "--help")

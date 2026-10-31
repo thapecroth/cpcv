@@ -5,7 +5,7 @@
 <h1 align="center">cpcv</h1>
 
 <p align="center">
-  <strong>Screenshot locally. Paste the remote path into the tmux pane you mean.</strong>
+  <strong>Screenshot locally. Paste the remote path into the tmux or Herdr pane you mean.</strong>
 </p>
 
 <p align="center">
@@ -29,10 +29,17 @@
 
 cpcv is a small desktop companion for a local-to-remote terminal workflow. It
 watches images you already copied, uploads them to your own SSH target, and
-lets tmux insert the remote `latest.png` path into only the active pane. The
-no-configuration plugin fallback is tmux's prefix followed by `v`, while the
-desktop integration lets you explicitly choose a shortcut. It does not capture
+lets tmux or [Herdr](docs/herdr.md) insert the remote `latest.png` path into
+only the active pane. The no-configuration tmux plugin fallback is its prefix
+followed by `v`, while the desktop integration lets you explicitly choose a
+shortcut. It does not capture
 your screen or silently replace your clipboard with text.
+
+**Using Herdr?** Install the optional helper with
+`bash deploy-herdr.sh --host image-box`, then add its printed keybinding to
+the remote Herdr configuration. See [Herdr setup](docs/herdr.md) for Windows,
+Homebrew, named sessions, and remote attachment. The tmux setup below is
+optional when using Herdr.
 
 ## Why cpcv?
 

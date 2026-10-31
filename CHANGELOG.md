@@ -9,6 +9,11 @@ fixes increment the patch version.
 
 ### Added
 
+- Optional Herdr image-path paste for Windows/macOS upload workflows, with a
+  Python 3 helper on the SSH host, a deployment script, and the Homebrew
+  `cpcv-deploy-herdr` command. A user-owned Herdr keybinding inserts the latest
+  image path into its originating pane without pressing Enter or using tmux.
+
 - Windows uploads can recover from orphaned legacy Cloudflare Access login
   locks. Recovery is limited to the configured direct Cloudflare SSH proxy,
   preserves live connections and token files, and uses a bounded normal
