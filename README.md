@@ -1,33 +1,33 @@
 <p align="center">
-  <img src="assets/windows/cpcv-logo.png" width="96" alt="cpcv clipboard upload icon">
+  <img src="assets/windows/ctrl-ccv-logo.png" width="96" alt="ctrl-ccv clipboard upload icon">
 </p>
 
-<h1 align="center">cpcv</h1>
+<h1 align="center">ctrl-ccv</h1>
 
 <p align="center">
   <strong>Screenshot locally. Paste the remote path into the tmux or Herdr pane you mean.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/thapecroth/cpcv/releases/latest">Download</a> &middot;
+  <a href="https://github.com/thapecroth/ctrl-ccv/releases/latest">Download</a> &middot;
   <a href="#quick-start">Quick start</a> &middot;
   <a href="docs/platforms.md">Documentation</a> &middot;
   <a href="SECURITY.md">Security</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/thapecroth/cpcv/actions/workflows/ci.yml"><img src="https://github.com/thapecroth/cpcv/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <a href="https://github.com/thapecroth/cpcv/releases/latest"><img src="https://img.shields.io/github/v/release/thapecroth/cpcv?display_name=tag&sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/thapecroth/ctrl-ccv/actions/workflows/ci.yml"><img src="https://github.com/thapecroth/ctrl-ccv/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/thapecroth/ctrl-ccv/releases/latest"><img src="https://img.shields.io/github/v/release/thapecroth/ctrl-ccv?display_name=tag&sort=semver" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563eb.svg" alt="MIT License"></a>
 </p>
 
 <p align="center">
-  <img src="assets/cpcv-workflow.png" width="880" alt="A copied image is uploaded to an SSH target and its remote path is pasted into a tmux pane">
+  <img src="assets/ctrl-ccv-workflow.png" width="880" alt="A copied image is uploaded to an SSH target and its remote path is pasted into a tmux pane">
 </p>
 
 **No cloud account. Your existing SSH configuration. Your image clipboard stays an image.**
 
-cpcv is a small desktop companion for a local-to-remote terminal workflow. It
+ctrl-ccv is a small desktop companion for a local-to-remote terminal workflow. It
 watches images you already copied, uploads them to your own SSH target, and
 lets tmux or [Herdr](docs/herdr.md) insert the remote `latest.png` path into
 only the active pane. The no-configuration tmux plugin fallback is its prefix
@@ -41,9 +41,9 @@ the remote Herdr configuration. See [Herdr setup](docs/herdr.md) for Windows,
 Homebrew, named sessions, and remote attachment. The tmux setup below is
 optional when using Herdr.
 
-## Why cpcv?
+## Why ctrl-ccv?
 
-| You need | cpcv gives you |
+| You need | ctrl-ccv gives you |
 | --- | --- |
 | Images available to a remote coding session | Automatic SSH/SCP upload to your own target. |
 | A paste that lands in the right place | A configurable tmux shortcut—including Windows **Alt-V** plus macOS **Ctrl-V**—inserts the path only in the tmux pane where you press it. |
@@ -51,6 +51,9 @@ optional when using Herdr.
 | A simple, private setup | No hosted service, account, browser extension, or replacement screenshot tool. |
 
 ## Quick start
+
+Upgrading an existing installation? Follow the
+[rename upgrade steps](docs/platforms.md#upgrading-across-the-rename) first.
 
 Most people should use a release install. It needs no source build: use the
 Windows setup wizard or the macOS Homebrew formula. Transparent ZIP bundles
@@ -63,14 +66,14 @@ remain available for people who prefer them or need an offline install.
 >   host only for pane-specific path insertion.
 > - Replace `image-box` below with your own working SSH alias or host. Confirm
 >   it works without an interactive prompt using
->   `ssh -o BatchMode=yes image-box true` before depending on cpcv.
+>   `ssh -o BatchMode=yes image-box true` before depending on ctrl-ccv.
 
 ### 1. Choose an install
 
 | Your computer | Recommended | Alternative |
 | --- | --- | --- |
-| Windows 10/11 | `cpcv-vX.Y.Z-windows-setup.exe` from the [latest release](https://github.com/thapecroth/cpcv/releases/latest) | Transparent `cpcv-vX.Y.Z-windows.zip` |
-| macOS 11+ (Apple Silicon or Intel) | `brew install thapecroth/cpcv/cpcv` | `cpcv-vX.Y.Z-macos-universal.zip` from the latest release |
+| Windows 10/11 | `ctrl-ccv-vX.Y.Z-windows-setup.exe` from the [latest release](https://github.com/thapecroth/ctrl-ccv/releases/latest) | Transparent `ctrl-ccv-vX.Y.Z-windows.zip` |
+| macOS 11+ (Apple Silicon or Intel) | `brew install thapecroth/cpcv/ctrl-ccv` | `ctrl-ccv-vX.Y.Z-macos-universal.zip` from the latest release |
 
 The release page supplies `SHA256SUMS.txt`. Verify the exact Windows EXE or
 ZIP you download before running it. The Windows setup wizard is per-user and
@@ -87,17 +90,17 @@ can still ask for explicit approval after verification.
 
 #### Windows setup wizard (recommended)
 
-Download `cpcv-vX.Y.Z-windows-setup.exe`, verify its SHA-256 entry in
-`SHA256SUMS.txt`, and run it. After copying cpcv, Setup opens a short connection
+Download `ctrl-ccv-vX.Y.Z-windows-setup.exe`, verify its SHA-256 entry in
+`SHA256SUMS.txt`, and run it. After copying ctrl-ccv, Setup opens a short connection
 guide. Enter the SSH connection name you would use with `ssh <name>` (for
 example, `image-box` or `me@image-box`) and a relative remote image folder.
 Use an SSH config alias for a custom port or proxy; keep passwords, keys, and
-proxy rules in your normal SSH configuration. Existing private cpcv settings
+proxy rules in your normal SSH configuration. Existing private ctrl-ccv settings
 are preserved.
 
 The final setup-status page tells you whether the local watcher and tray app
 started, whether the SSH computer accepted a non-interactive connection,
-whether `tmux` is installed there, and whether the optional cpcv tmux plugin
+whether `tmux` is installed there, and whether the optional ctrl-ccv tmux plugin
 files were installed. The tmux plugin task is off by default. After Setup, the
 tray's **Configure tmux path insertion…** action can install or update the
 optional integration; neither it nor Setup edits the remote `~/.tmux.conf`.
@@ -109,11 +112,11 @@ target when it is ready:
 ssh -o BatchMode=yes image-box true
 ```
 
-To change the SSH target or remote folder later, right-click the cpcv tray icon
+To change the SSH target or remote folder later, right-click the ctrl-ccv tray icon
 and choose **Settings…**. The form validates the saved private configuration
 and restarts the owned local service when you save, so there is no need to edit
-`config.psd1` for routine changes. It warns when field-level `CPCV_*`
-environment variables override saved values or `CPCV_CONFIG` selects a
+`config.psd1` for routine changes. It warns when field-level `CTRL_CCV_*`
+environment variables override saved values or `CTRL_CCV_CONFIG` selects a
 different settings file. **View recent activity…** shows a bounded, redacted tail
 of local activity instead of opening the raw log file.
 
@@ -122,17 +125,17 @@ the tray menu. It opens on the cross-platform choice: **Windows Alt-V + macOS
 Ctrl-V**. This deliberately binds both tmux keys (`M-v` and `C-v`) on the
 shared remote server; it does not try to detect the client OS. The portable
 **tmux prefix, then v**, a custom prefix key, and raw **Ctrl-V**-only remain
-available. Choosing **Apply** explicitly updates only cpcv-owned remote plugin
+available. Choosing **Apply** explicitly updates only ctrl-ccv-owned remote plugin
 and configuration files; it never changes your tmux configuration file.
 
 #### Windows portable ZIP (advanced)
 
-Open PowerShell in the extracted `cpcv-windows` folder and run:
+Open PowerShell in the extracted `ctrl-ccv-windows` folder and run:
 
 ```powershell
-$configDir = Join-Path $env:LOCALAPPDATA 'cpcv'
+$configDir = Join-Path $env:LOCALAPPDATA 'ctrl-ccv'
 New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-Copy-Item .\cpcv.config.example.psd1 (Join-Path $configDir 'config.psd1')
+Copy-Item .\ctrl-ccv.config.example.psd1 (Join-Path $configDir 'config.psd1')
 notepad (Join-Path $configDir 'config.psd1') # Set HostAlias to image-box, then save.
 
 ssh image-box true
@@ -156,12 +159,12 @@ Remove the old portable startup/tray integration before switching to Setup.
 #### macOS with Homebrew (recommended)
 
 ```bash
-brew install thapecroth/cpcv/cpcv
-cpcv-setup
+brew install thapecroth/cpcv/ctrl-ccv
+ctrl-ccv-setup
 ```
 
-Homebrew installs the package only; `cpcv-setup` explicitly creates and starts
-the current-user services. Click the cpcv menu-bar icon, choose **Settings...**,
+Homebrew installs the package only; `ctrl-ccv-setup` explicitly creates and starts
+the current-user services. Click the ctrl-ccv menu-bar icon, choose **Settings...**,
 set your SSH target to `image-box`, and save. Then verify the connection. For
 the optional pane-specific integration, choose **Configure tmux path
 insertion…** from that same menu bar:
@@ -170,19 +173,19 @@ insertion…** from that same menu bar:
 ssh image-box true
 ```
 
-The `cpcv-deploy-tmux --host image-box` command remains available for
+The `ctrl-ccv-deploy-tmux --host image-box` command remains available for
 unattended or script-driven deployment.
 
 #### macOS universal ZIP (alternative)
 
-Open Terminal in the extracted `cpcv` folder and run:
+Open Terminal in the extracted `ctrl-ccv` folder and run:
 
 ```bash
 bash macos/install-macos.sh --prebuilt
 bash macos/install-tray.sh --prebuilt
 ```
 
-Click the cpcv menu-bar icon, choose **Settings…**, set your SSH target to
+Click the ctrl-ccv menu-bar icon, choose **Settings…**, set your SSH target to
 `image-box`, and save. Then verify the connection and, if wanted, choose
 **Configure tmux path insertion…** from the same menu:
 
@@ -191,7 +194,7 @@ ssh image-box true
 ```
 
 For script-driven deployment, use
-`bash macos/deploy-remote-tmux-cpcv-plugin.sh --host image-box` instead.
+`bash macos/deploy-remote-tmux-ctrl-ccv-plugin.sh --host image-box` instead.
 
 The menu-bar app and local uploader start now and at sign-in. If you use a
 remote folder other than `clipboard-images`, pass the same value to the deploy
@@ -203,7 +206,7 @@ The remote helper deliberately never edits your tmux configuration. On
 `image-box`, add this one line to your `~/.tmux.conf`:
 
 ```tmux
-run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
+run-shell ~/.local/lib/ctrl-ccv/tmux/ctrl-ccv.tmux
 ```
 
 Open **Configure tmux path insertion…** from the Windows tray icon or macOS
@@ -211,9 +214,9 @@ menu-bar icon. Its selected default is **Windows Alt-V + macOS Ctrl-V**: tmux
 binds both `M-v` and `C-v`, so each client can use its preferred key without
 tmux guessing the operating system. A portable **tmux prefix, then v** binding,
 a custom prefix key, and raw **Ctrl-V**-only are also available. When you
-explicitly apply the choice, it installs or updates only marked cpcv files on
-the configured SSH account and saves the selection in cpcv's remote
-configuration. If the default tmux server is already running, it reloads cpcv
+explicitly apply the choice, it installs or updates only marked ctrl-ccv files on
+the configured SSH account and saves the selection in ctrl-ccv's remote
+configuration. If the default tmux server is already running, it reloads ctrl-ccv
 there so the choice can work immediately. It still never edits
 `~/.tmux.conf`: copy the one `run-shell` line above into your own configuration
 so the integration persists after the server restarts.
@@ -226,13 +229,13 @@ instead. `Alt-V` must be forwarded by the Windows terminal as tmux `M-v`.
 For a manual reload at any time, run:
 
 ```bash
-tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"
+tmux run-shell "$HOME/.local/lib/ctrl-ccv/tmux/ctrl-ccv.tmux"
 ```
 
 If you skipped the optional tmux helpers in Windows Setup, run
-`& "$env:LOCALAPPDATA\Programs\cpcv\install-autostart.ps1" -DeployRemoteHelpers`
+`& "$env:LOCALAPPDATA\Programs\ctrl-ccv\install-autostart.ps1" -DeployRemoteHelpers`
 after your SSH configuration is ready. With Homebrew, use
-`cpcv-deploy-tmux --host image-box`. Then add the same `run-shell` line.
+`ctrl-ccv-deploy-tmux --host image-box`. Then add the same `run-shell` line.
 
 ### 4. Use it
 
@@ -244,23 +247,23 @@ after your SSH configuration is ready. With Homebrew, use
 
 | Platform | A healthy first upload looks like |
 | --- | --- |
-| Windows | Hover the cpcv tray icon: `Healthy - Uploaded …`. `No upload yet` is normal until the first image. |
+| Windows | Hover the ctrl-ccv tray icon: `Healthy - Uploaded …`. `No upload yet` is normal until the first image. |
 | macOS | The menu-bar icon shows a checkmark when healthy; it spins during upload and shows a warning when attention is needed. |
 
-On Windows, a yellow badged tray icon means cpcv's last upload was not
+On Windows, a yellow badged tray icon means ctrl-ccv's last upload was not
 confirmed. The hover text distinguishes a live local service from a remote
 connection problem: **Service running — SSH needs attention**. **View status…**
 identifies the safe failure stage and, for an early SSH failure, offers
 **Connection help…**. The assistant explains what happened without displaying
 your host, proxy, path, or raw SSH output; **Test unattended SSH** starts a
-new unattended cpcv process with the same no-prompt SSH settings cpcv uses and
+new unattended ctrl-ccv process with the same no-prompt SSH settings ctrl-ccv uses and
 a read-only `true` command, so it does not upload an image or change remote
 files. It may honor an existing SSH multiplexing configuration, so it does not
 claim to force a new network handshake. When that check passes, use **Retry
 clipboard upload**. A terminal SSH session can still work while an unattended
-non-interactive connection used by cpcv times out.
+non-interactive connection used by ctrl-ccv times out.
 
-On Windows, cpcv also detects stale Cloudflare Access login locks after an
+On Windows, ctrl-ccv also detects stale Cloudflare Access login locks after an
 SSH timeout or proxy/sign-in failure during setup, transfer, or finalization. For a simple `cloudflared access
 ssh --hostname ...` proxy, it preserves active connections, moves only old,
 empty locks for that application to local recovery storage, and attempts the
@@ -268,7 +271,7 @@ normal Cloudflare sign-in refresh. A successful refresh resumes uploads on
 the next retry. Refresh attempts are limited to once every ten minutes.
 If browser sign-in still needs your input, the status view says **Cloudflare
 sign-in needs attention**. Complete that step in your normal SSH workflow.
-JWT tokens, SSH keys, and server identity checks are never rewritten by cpcv.
+JWT tokens, SSH keys, and server identity checks are never rewritten by ctrl-ccv.
 Other proxies and newer nonempty Cloudflare lock formats use normal retries.
 
 Windows clipboard contention is retried briefly before returning **Clipboard
@@ -291,7 +294,7 @@ then `v`, for terminals where either raw shortcut would be undesirable; see
 
 ## What happens after setup?
 
-| You do | cpcv does |
+| You do | ctrl-ccv does |
 | --- | --- |
 | Screenshot or copy an image | Leaves the image on your local clipboard. |
 | Wait for the background upload | Stores a timestamped image on the SSH target and updates `latest.png`. |
@@ -299,20 +302,20 @@ then `v`, for terminals where either raw shortcut would be undesirable; see
 | Need the path outside tmux | Lets you explicitly copy the last validated path from the status app. |
 
 `latest.png` normally lives at `~/clipboard-images/latest.png` on the SSH
-target. cpcv uses the `ssh` and `scp` tools you already use; there is no cpcv
+target. ctrl-ccv uses the `ssh` and `scp` tools you already use; there is no ctrl-ccv
 server to run or account to create.
 
 ## Status, troubleshooting, and customization
 
 | If this happens | Try this |
 | --- | --- |
-| Windows tray shows **Service running — SSH needs attention** | Open **View status…** then **Connection help…**. Select **Test unattended SSH** first: it starts a new unattended cpcv process with the actual no-prompt SSH settings but makes no remote file changes. Follow the displayed next step, confirm the connection name in **Settings…**, and retry the clipboard image only after the test succeeds. |
-| Uploads are not completing | Open the cpcv status view. If the failure is at the first SSH step, use **Connection help…** rather than restarting the healthy local service. The assistant distinguishes an SSH greeting timeout, non-interactive sign-in, host-key protection, an unresolved connection name, a proxy/tunnel start, and remote-folder access. If sign-in requires a password, approval, security-key touch, or one-time code, complete it only in your normal SSH workflow; cpcv never asks for or stores that information. |
-| Your configured tmux shortcut does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/cpcv/tmux/cpcv.tmux"`. For the cross-platform choice, verify Windows forwards **Alt-V** as `M-v`; Warp may consume bare **Ctrl-V**. **Configure tmux path insertion…** in either desktop app can also check and reapply cpcv's remote integration. |
+| Windows tray shows **Service running — SSH needs attention** | Open **View status…** then **Connection help…**. Select **Test unattended SSH** first: it starts a new unattended ctrl-ccv process with the actual no-prompt SSH settings but makes no remote file changes. Follow the displayed next step, confirm the connection name in **Settings…**, and retry the clipboard image only after the test succeeds. |
+| Uploads are not completing | Open the ctrl-ccv status view. If the failure is at the first SSH step, use **Connection help…** rather than restarting the healthy local service. The assistant distinguishes an SSH greeting timeout, non-interactive sign-in, host-key protection, an unresolved connection name, a proxy/tunnel start, and remote-folder access. If sign-in requires a password, approval, security-key touch, or one-time code, complete it only in your normal SSH workflow; ctrl-ccv never asks for or stores that information. |
+| Your configured tmux shortcut does nothing | Confirm the `run-shell` line is in the remote `~/.tmux.conf`, then rerun `tmux run-shell "$HOME/.local/lib/ctrl-ccv/tmux/ctrl-ccv.tmux"`. For the cross-platform choice, verify Windows forwards **Alt-V** as `M-v`; Warp may consume bare **Ctrl-V**. **Configure tmux path insertion…** in either desktop app can also check and reapply ctrl-ccv's remote integration. |
 | tmux says `no image` | Copy an image locally and wait for the first upload. |
 | You changed server or remote folder | Update **Settings…**, then use **Configure tmux path insertion…** in either desktop app or redeploy the remote tmux helper from a script. |
 
-On macOS, `bash macos/cpcv-macos-ctl.sh doctor` checks the local service, SSH
+On macOS, `bash macos/ctrl-ccv-macos-ctl.sh doctor` checks the local service, SSH
 reachability, remote directory, and clock synchronization. On Windows,
 right-click the tray icon and choose **View status** for the dashboard,
 **Settings…**, **Configure tmux path insertion…**, **View recent activity…**,
@@ -327,18 +330,18 @@ intentionally select one binding instead of the paired cross-platform preset.
 You can customize tmux before its `run-shell` line:
 
 ```tmux
-# The portable default is tmux prefix, then v. Hide cpcv's status item,
+# The portable default is tmux prefix, then v. Hide ctrl-ccv's status item,
 # refresh it every five seconds, or choose another key in the prefix table.
-set -g @cpcv-status off
-set -g @cpcv-status-refresh 5
-set -g @cpcv-paste-table prefix
-set -g @cpcv-paste-key p
+set -g @ctrl-ccv-status off
+set -g @ctrl-ccv-status-refresh 5
+set -g @ctrl-ccv-paste-table prefix
+set -g @ctrl-ccv-paste-key p
 
 # Optional: capture raw Ctrl-V instead. Do this only when your terminal
 # forwards Ctrl-V to tmux; it will replace normal Ctrl-V behavior in that tmux
 # session.
-# set -g @cpcv-paste-table root
-# set -g @cpcv-paste-key C-v
+# set -g @ctrl-ccv-paste-table root
+# set -g @ctrl-ccv-paste-key C-v
 ```
 
 For all configuration fields, diagnostics, and platform behavior, see
@@ -346,10 +349,10 @@ For all configuration fields, diagnostics, and platform behavior, see
 
 ## Privacy and safety
 
-- cpcv uploads only image clipboard content through your existing SSH setup;
+- ctrl-ccv uploads only image clipboard content through your existing SSH setup;
   it does not replace the image clipboard with a path.
 - It uses bounded, redacted diagnostics and hard timeouts for SSH/SCP commands.
-- Installers and **Configure tmux path insertion…** operate only on cpcv-owned
+- Installers and **Configure tmux path insertion…** operate only on ctrl-ccv-owned
   local services and marked remote helper/configuration files. They do not edit
   shell startup files, `PATH`, or `~/.tmux.conf`.
 - Private configuration, cached images, and logs can be sensitive. They stay
@@ -360,13 +363,13 @@ reporting process.
 
 ## Update, remove, or go deeper
 
-To update Windows, right-click the cpcv tray icon and choose **Get latest
-version…**. It shows the installed version and opens only cpcv's official
+To update Windows, right-click the ctrl-ccv tray icon and choose **Get latest
+version…**. It shows the installed version and opens only ctrl-ccv's official
 GitHub Releases page; it does not silently download or run software. Verify the
 newer Setup EXE against `SHA256SUMS.txt`, then run it. Setup keeps private
 configuration and data by default. For a portable ZIP, extract the new release
 and rerun its installers. To update Homebrew, run `brew upgrade
-thapecroth/cpcv/cpcv` followed by `cpcv-setup`; redeploy the tmux helper after
+thapecroth/cpcv/ctrl-ccv` followed by `ctrl-ccv-setup`; redeploy the tmux helper after
 its source changes.
 
 To remove the Windows setup installation while preserving private settings and
@@ -377,10 +380,10 @@ running them without `-WhatIf`. For a macOS ZIP, run
 discarding it. For Homebrew, stop the user services before removing the formula:
 
 ```bash
-prefix="$(brew --prefix cpcv)"
+prefix="$(brew --prefix ctrl-ccv)"
 bash "$prefix/libexec/macos/uninstall-tray.sh"
 bash "$prefix/libexec/macos/uninstall-macos.sh"
-brew uninstall cpcv
+brew uninstall ctrl-ccv
 ```
 
 - [Full platform guide](docs/platforms.md)

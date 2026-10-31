@@ -5,13 +5,13 @@ IFS=$'\n\t'
 umask 077
 
 die() {
-  printf 'cpcv Homebrew formula: %s\n' "$*" >&2
+  printf 'ctrl-ccv Homebrew formula: %s\n' "$*" >&2
   exit 1
 }
 
 usage() {
   cat <<'USAGE'
-Usage: render-formula.sh --version X.Y.Z --sha256 SHA256 --output Formula/cpcv.rb
+Usage: render-formula.sh --version X.Y.Z --sha256 SHA256 --output Formula/ctrl-ccv.rb
 USAGE
 }
 
@@ -39,7 +39,7 @@ case "$script_path" in
   *) script_parent='.' ;;
 esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
-template="$script_dir/cpcv.rb.template"
+template="$script_dir/ctrl-ccv.rb.template"
 [[ -f "$template" && ! -L "$template" ]] || die 'Formula template is unavailable.'
 
 output_dir=${output%/*}
@@ -47,11 +47,11 @@ output_dir=${output%/*}
 mkdir -p -- "$output_dir"
 output_dir=$(CDPATH= cd -P -- "$output_dir" && /bin/pwd -P)
 output_name=${output##*/}
-[[ "$output_name" == 'cpcv.rb' ]] || die 'Formula output must be named cpcv.rb.'
+[[ "$output_name" == 'ctrl-ccv.rb' ]] || die 'Formula output must be named ctrl-ccv.rb.'
 output_path="$output_dir/$output_name"
 [[ ! -L "$output_path" ]] || die 'Refusing a symlinked formula output path.'
 
-temporary=$(/usr/bin/mktemp "$output_dir/.cpcv.rb.XXXXXX")
+temporary=$(/usr/bin/mktemp "$output_dir/.ctrl-ccv.rb.XXXXXX")
 trap '/bin/rm -f -- "$temporary"' EXIT
 /usr/bin/sed \
   -e "s/__VERSION__/$version/g" \

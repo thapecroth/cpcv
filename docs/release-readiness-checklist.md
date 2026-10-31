@@ -1,6 +1,6 @@
 # Release-readiness checklist
 
-Use this checklist before creating a public or private cpcv release.
+Use this checklist before creating a public or private ctrl-ccv release.
 
 ## Source and privacy
 
@@ -38,7 +38,7 @@ Use this checklist before creating a public or private cpcv release.
       session and on an upgrade: it needs no elevation, preserves private data,
       and starts exactly one owned watcher/tray pair.
 - [ ] If claiming macOS support, installation creates only the current user's
-      `io.cpcv.*` jobs and never creates a root LaunchDaemon.
+      `io.ctrl-ccv.*` jobs and never creates a root LaunchDaemon.
 - [ ] The tray status is bounded and redacted, and every control action targets
       the current checkout/service only.
 - [ ] The Windows dashboard and branded tray icon have been visually inspected
@@ -63,7 +63,7 @@ Use this checklist before creating a public or private cpcv release.
       passes both native self-tests.
 - [ ] The `thapecroth/homebrew-cpcv` formula references the exact macOS release
       ZIP and SHA-256, installs without creating GUI services, and its
-      `cpcv-setup` path has been exercised in a fresh user session.
+      `ctrl-ccv-setup` path has been exercised in a fresh user session.
 - [ ] `SHA256SUMS.txt` has been generated from the exact release assets and
       successfully verifies them.
 - [ ] A live SSH transfer is called successful only when run against an

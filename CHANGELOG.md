@@ -7,11 +7,18 @@ fixes increment the patch version.
 
 ## Unreleased
 
+### Changed
+
+- Renamed the project, GitHub repository, commands, installers, release assets,
+  desktop services, and remote integrations to `ctrl-ccv`. Environment
+  variables now use `CTRL_CCV_*`. Existing installations need the
+  [rename upgrade steps](docs/platforms.md#upgrading-across-the-rename).
+
 ### Added
 
 - Optional Herdr image-path paste for Windows/macOS upload workflows, with a
   Python 3 helper on the SSH host, a deployment script, and the Homebrew
-  `cpcv-deploy-herdr` command. A user-owned Herdr keybinding inserts the latest
+  `ctrl-ccv-deploy-herdr` command. A user-owned Herdr keybinding inserts the latest
   image path into its originating pane without pressing Enter or using tmux.
 
 - Windows uploads can recover from orphaned legacy Cloudflare Access login
@@ -76,7 +83,7 @@ fixes increment the patch version.
 ### Added
 
 - Windows tray and status dashboard now show the bundled version and provide a
-  **Get latest version…** action. It opens only the official cpcv GitHub
+  **Get latest version…** action. It opens only the official ctrl-ccv GitHub
   Releases page so a person can choose, checksum-verify, and visibly run a
   versioned Setup EXE.
 
@@ -84,7 +91,7 @@ fixes increment the patch version.
 
 - Windows tray status now distinguishes a live watcher from a failed or
   retrying clipboard upload. It shows a safe, actionable transport summary,
-  preserves the warning until cpcv confirms a later upload, and changes the
+  preserves the warning until ctrl-ccv confirms a later upload, and changes the
   notification-area icon to a branded status badge.
 
 ## v0.6.0 - 2026-09-14
@@ -102,17 +109,17 @@ fixes increment the patch version.
 - The no-configuration tmux plugin fallback is now the portable tmux prefix
   followed by `v`; custom prefix and raw `Ctrl-V`-only profiles remain
   available.
-- cpcv verifies both requested shortcut slots before changing managed bindings
+- ctrl-ccv verifies both requested shortcut slots before changing managed bindings
   and preserves explicit user-owned tmux settings and configuration files.
 
 ## v0.5.0 - 2026-09-12
 
 ### Added
 
-- Windows Setup now finishes copying cpcv before opening a connection guide for
+- Windows Setup now finishes copying ctrl-ccv before opening a connection guide for
   the SSH computer name and remote image folder.
 - The Windows installer now verifies the configured non-interactive SSH
-  connection and reports local watcher, tray, remote tmux, and cpcv tmux-plugin
+  connection and reports local watcher, tray, remote tmux, and ctrl-ccv tmux-plugin
   status in a post-install readiness summary.
 
 ### Changed
@@ -126,26 +133,26 @@ fixes increment the patch version.
 ### Fixed
 
 - Homebrew now installs the macOS release ZIP from Homebrew's staged archive
-  root, so `brew install thapecroth/cpcv/cpcv` no longer looks for a nonexistent
-  nested `cpcv` directory.
+  root, so `brew install thapecroth/cpcv/ctrl-ccv` no longer looks for a nonexistent
+  nested `ctrl-ccv` directory.
 
 ## v0.4.0 - 2026-09-07
 
 ### Added
 
-- A standard per-user Windows Setup.exe wizard that preserves private cpcv
-  configuration and data, restarts only verified cpcv-owned local integrations
+- A standard per-user Windows Setup.exe wizard that preserves private ctrl-ccv
+  configuration and data, restarts only verified ctrl-ccv-owned local integrations
   on upgrade, and ships beside the transparent portable ZIP.
 - Release automation that compiles and validates the Windows installer from a
   clean committed tree.
-- A Homebrew formula distribution path for macOS, including a `cpcv-setup`
+- A Homebrew formula distribution path for macOS, including a `ctrl-ccv-setup`
   helper and release automation for the `thapecroth/homebrew-cpcv` tap.
 
 ### Security
 
 - The Windows installer uses no administrator privileges, creates a new config
   atomically, and fails closed rather than replacing an unrelated portable
-  cpcv Startup integration.
+  ctrl-ccv Startup integration.
 - Windows Setup.exe remains unsigned pending Authenticode signing; macOS
   release binaries remain ad-hoc-signed and not notarized.
 
@@ -159,7 +166,7 @@ fixes increment the patch version.
 - Bounds for individual clipboard images and retained local cache bytes.
 - An optional Windows notification-area tray with bounded/redacted status and
   scoped local controls.
-- An original cpcv application mark, transparent dashboard logo, and
+- An original ctrl-ccv application mark, transparent dashboard logo, and
   multi-resolution Windows tray icon.
 - A reproducible `build-windows.ps1` archive build that packages only committed
   source and validates required branded assets.

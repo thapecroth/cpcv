@@ -2,20 +2,20 @@
 # command is requested by this test and no remote file is changed.
 $ErrorActionPreference = "Stop"
 $share = Split-Path $PSScriptRoot -Parent
-. (Join-Path $share "cpcv-core.ps1")
+. (Join-Path $share "ctrl-ccv-core.ps1")
 
 function Get-Watchers {
     @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object {
-        Test-CpcvProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath (Join-Path $share 'cpcv-watch.ps1')
+        Test-CtrlCcvProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath (Join-Path $share 'ctrl-ccv-watch.ps1')
     })
 }
 function Get-Guardians {
     @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object {
-        Test-CpcvProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath (Join-Path $share 'cpcv-guardian.ps1')
+        Test-CtrlCcvProcessCommandLineForScript -CommandLine $_.CommandLine -ScriptPath (Join-Path $share 'ctrl-ccv-guardian.ps1')
     })
 }
 
-function Wait-CpcvTestProcessExit {
+function Wait-CtrlCcvTestProcessExit {
     param([Parameter(Mandatory)]$Process, [ValidateRange(1, 15)][int]$TimeoutSeconds = 5)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
@@ -28,23 +28,23 @@ function Wait-CpcvTestProcessExit {
 
 $guardians = @(Get-Guardians)
 if ($guardians.Count -ne 1) { throw "Expected exactly one running guardian; found $($guardians.Count)." }
-$secondGuardian = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'RemoteSigned', '-File', ('"{0}"' -f (Join-Path $share 'cpcv-guardian.ps1')))
-if (-not (Wait-CpcvTestProcessExit -Process $secondGuardian)) {
-    Stop-CpcvProcessTree -ProcessId $secondGuardian.Id
+$secondGuardian = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'RemoteSigned', '-File', ('"{0}"' -f (Join-Path $share 'ctrl-ccv-guardian.ps1')))
+if (-not (Wait-CtrlCcvTestProcessExit -Process $secondGuardian)) {
+    Stop-CtrlCcvProcessTree -ProcessId $secondGuardian.Id
     throw "A duplicate guardian did not exit after failing to acquire its mutex."
 }
 $before = @(Get-Watchers)
 if ($before.Count -ne 1) { throw "Expected exactly one running watcher; found $($before.Count)." }
 $beforePid = $before[0].ProcessId
-$secondWatcher = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'RemoteSigned', '-File', ('"{0}"' -f (Join-Path $share 'cpcv-watch.ps1')))
-if (-not (Wait-CpcvTestProcessExit -Process $secondWatcher)) {
-    Stop-CpcvProcessTree -ProcessId $secondWatcher.Id
+$secondWatcher = Start-Process powershell.exe -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-STA', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'RemoteSigned', '-File', ('"{0}"' -f (Join-Path $share 'ctrl-ccv-watch.ps1')))
+if (-not (Wait-CtrlCcvTestProcessExit -Process $secondWatcher)) {
+    Stop-CtrlCcvProcessTree -ProcessId $secondWatcher.Id
     throw "A duplicate watcher did not exit after failing to acquire its mutex."
 }
 
 # Simulate a stalled/dead watcher locally. The guardian must create one fresh
 # replacement and never leave two active uploaders.
-Stop-CpcvProcessTree -ProcessId $beforePid
+Stop-CtrlCcvProcessTree -ProcessId $beforePid
 $watchExitDeadline = (Get-Date).AddSeconds(8)
 do {
     Start-Sleep -Milliseconds 100
@@ -55,24 +55,24 @@ if ($stoppedWatchers.Count -gt 0) { throw "The test watcher $beforePid did not e
 # The live watcher would normally refresh this file every poll. Write corrupt
 # state only after it is gone, then let the existing guardian recover both the
 # stopped watcher and bad health data without a race in the assertion itself.
-Set-Content -Path $script:CpcvConfig.HeartbeatFile -Value "corrupt health state" -NoNewline
-$corruptProbe = Join-Path $env:TEMP ("cpcv-corrupt-heartbeat-{0}.txt" -f [Guid]::NewGuid())
+Set-Content -Path $script:CtrlCcvConfig.HeartbeatFile -Value "corrupt health state" -NoNewline
+$corruptProbe = Join-Path $env:TEMP ("ctrl-ccv-corrupt-heartbeat-{0}.txt" -f [Guid]::NewGuid())
 try {
     Set-Content -LiteralPath $corruptProbe -Value "corrupt health state" -NoNewline
-    if (Test-CpcvHeartbeat -Path $corruptProbe) { throw "Corrupt heartbeat was accepted as healthy." }
+    if (Test-CtrlCcvHeartbeat -Path $corruptProbe) { throw "Corrupt heartbeat was accepted as healthy." }
 }
 finally {
     Remove-Item -LiteralPath $corruptProbe -Force -ErrorAction SilentlyContinue
 }
 
-$freshnessLimit = [Math]::Max(10, [int]$script:CpcvConfig.WatchdogCheckSeconds + 5)
-$deadline = (Get-Date).AddSeconds([Math]::Max(35, ([int]$script:CpcvConfig.WatchdogCheckSeconds * 3) + 10))
+$freshnessLimit = [Math]::Max(10, [int]$script:CtrlCcvConfig.WatchdogCheckSeconds + 5)
+$deadline = (Get-Date).AddSeconds([Math]::Max(35, ([int]$script:CtrlCcvConfig.WatchdogCheckSeconds * 3) + 10))
 $after = @()
 $heartbeatInfo = $null
 do {
     Start-Sleep -Seconds 1
     $after = @(Get-Watchers)
-    $heartbeatInfo = Get-CpcvHeartbeatInfo -Path $script:CpcvConfig.HeartbeatFile
+    $heartbeatInfo = Get-CtrlCcvHeartbeatInfo -Path $script:CtrlCcvConfig.HeartbeatFile
     $heartbeatFresh = ($null -ne $heartbeatInfo -and ((Get-Date).ToUniversalTime() - $heartbeatInfo.Timestamp.UtcDateTime).TotalSeconds -le $freshnessLimit)
 } while ((Get-Date) -lt $deadline -and (
         $after.Count -ne 1 -or

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a clean universal macOS release archive for cpcv.
+# Build a clean universal macOS release archive for ctrl-ccv.
 #
 # The archive starts with committed source only, then adds ad-hoc-signed
 # universal native binaries. It deliberately does not include local settings,
@@ -9,7 +9,7 @@ IFS=$'\n\t'
 umask 077
 
 die() {
-  printf 'cpcv macOS build: %s\n' "$*" >&2
+  printf 'ctrl-ccv macOS build: %s\n' "$*" >&2
   exit 1
 }
 
@@ -30,10 +30,10 @@ case "$script_path" in
 esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
 repository=$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null) || \
-  die 'Run this script from a cpcv Git checkout with git available.'
+  die 'Run this script from a ctrl-ccv Git checkout with git available.'
 repository=$(CDPATH= cd -P -- "$repository" && /bin/pwd -P)
 expected_root=$(CDPATH= cd -P -- "$script_dir/.." && /bin/pwd -P)
-[[ "$repository" == "$expected_root" ]] || die 'build-macos.sh must live in the cpcv repository macos directory.'
+[[ "$repository" == "$expected_root" ]] || die 'build-macos.sh must live in the ctrl-ccv repository macos directory.'
 
 output_directory="$repository/build"
 release_tag=''
@@ -76,8 +76,8 @@ version_file="$repository/VERSION"
 version=$(tr -d '\r\n' < "$version_file")
 semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 [[ "$version" =~ $semver ]] || die 'VERSION must contain stable SemVer.'
-source_version=$(/usr/bin/sed -nE 's/^private let cpcvVersion = "([^"]+)"$/\1/p' "$repository/macos/cpcv-macos.swift")
-[[ "$source_version" == "$version" ]] || die 'VERSION must match cpcvVersion in macos/cpcv-macos.swift.'
+source_version=$(/usr/bin/sed -nE 's/^private let ctrlCcvVersion = "([^"]+)"$/\1/p' "$repository/macos/ctrl-ccv-macos.swift")
+[[ "$source_version" == "$version" ]] || die 'VERSION must match ctrlCcvVersion in macos/ctrl-ccv-macos.swift.'
 release_tag=${release_tag:-"v$version"}
 [[ "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
   die 'Release tag must be stable SemVer such as v0.3.0.'
@@ -85,14 +85,14 @@ release_tag=${release_tag:-"v$version"}
 
 mkdir -p -- "$output_directory"
 output_directory=$(CDPATH= cd -P -- "$output_directory" && /bin/pwd -P)
-archive="$output_directory/cpcv-${release_tag}-macos-universal.zip"
+archive="$output_directory/ctrl-ccv-${release_tag}-macos-universal.zip"
 [[ ! -e "$archive" ]] || die "Refusing to overwrite an existing build artifact: $archive"
 
-stage=$(/usr/bin/mktemp -d "$output_directory/.cpcv-macos-build.XXXXXX")
+stage=$(/usr/bin/mktemp -d "$output_directory/.ctrl-ccv-macos-build.XXXXXX")
 trap '/bin/rm -rf -- "$stage"' EXIT
-bundle="$stage/cpcv"
-git -C "$repository" archive --format=tar --prefix=cpcv/ HEAD | /usr/bin/tar -x -C "$stage"
-[[ -d "$bundle" && ! -L "$bundle" ]] || die 'git archive did not produce the expected cpcv bundle root.'
+bundle="$stage/ctrl-ccv"
+git -C "$repository" archive --format=tar --prefix=ctrl-ccv/ HEAD | /usr/bin/tar -x -C "$stage"
+[[ -d "$bundle" && ! -L "$bundle" ]] || die 'git archive did not produce the expected ctrl-ccv bundle root.'
 
 build_directory="$bundle/macos/build"
 [[ ! -e "$build_directory" || ! -L "$build_directory" ]] || die 'Refusing a symlinked macOS build path in the archive.'
@@ -127,10 +127,10 @@ validate_universal_binary() {
   /usr/bin/codesign --verify --strict "$binary"
 }
 
-uploader="$build_directory/cpcv-macos"
-tray="$build_directory/cpcv-tray"
-compile_universal "$bundle/macos/cpcv-macos.swift" "$uploader" false
-compile_universal "$bundle/macos/cpcv-tray.swift" "$tray" true
+uploader="$build_directory/ctrl-ccv-macos"
+tray="$build_directory/ctrl-ccv-tray"
+compile_universal "$bundle/macos/ctrl-ccv-macos.swift" "$uploader" false
+compile_universal "$bundle/macos/ctrl-ccv-tray.swift" "$tray" true
 validate_universal_binary "$uploader"
 validate_universal_binary "$tray"
 "$uploader" self-test >/dev/null
@@ -143,19 +143,19 @@ printf '{"version":"%s","tag":"%s","architectures":["arm64","x86_64"],"signature
 [[ -f "$archive" && ! -L "$archive" ]] || die 'ditto did not create the expected ZIP.'
 /usr/bin/unzip -tqq "$archive"
 for required in \
-  cpcv/README.md \
-  cpcv/LICENSE \
-  cpcv/VERSION \
-  cpcv/RELEASE-METADATA.json \
-  cpcv/macos/install-macos.sh \
-  cpcv/macos/install-tray.sh \
-  cpcv/macos/deploy-remote-tmux-cpcv-plugin.sh \
-  cpcv/macos/build/cpcv-macos \
-  cpcv/macos/build/cpcv-tray; do
+  ctrl-ccv/README.md \
+  ctrl-ccv/LICENSE \
+  ctrl-ccv/VERSION \
+  ctrl-ccv/RELEASE-METADATA.json \
+  ctrl-ccv/macos/install-macos.sh \
+  ctrl-ccv/macos/install-tray.sh \
+  ctrl-ccv/macos/deploy-remote-tmux-ctrl-ccv-plugin.sh \
+  ctrl-ccv/macos/build/ctrl-ccv-macos \
+  ctrl-ccv/macos/build/ctrl-ccv-tray; do
   /usr/bin/unzip -Z1 "$archive" | /usr/bin/grep -Fx -- "$required" >/dev/null || \
     die "Build archive is missing required file: $required"
 done
-if /usr/bin/unzip -Z1 "$archive" | /usr/bin/grep -Eq '(^|/)(\.git/|cache/|build/\.cpcv-|last-hash\.txt|last-remote-path\.txt|watch\.heartbeat|(?:cpcv\.config|config)\.(?:psd1|json)|.*\.log(?:\.[0-9]+)?$)'; then
+if /usr/bin/unzip -Z1 "$archive" | /usr/bin/grep -Eq '(^|/)(\.git/|cache/|build/\.ctrl-ccv-|last-hash\.txt|last-remote-path\.txt|watch\.heartbeat|(?:ctrl-ccv\.config|config)\.(?:psd1|json)|.*\.log(?:\.[0-9]+)?$)'; then
   die 'Build archive unexpectedly contains local or generated state.'
 fi
 

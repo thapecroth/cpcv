@@ -19,15 +19,15 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "remote/cpcv-herdr.py"
-SPEC = importlib.util.spec_from_file_location("cpcv_herdr", SOURCE)
+SOURCE = ROOT / "remote/ctrl-ccv-herdr.py"
+SPEC = importlib.util.spec_from_file_location("ctrl_ccv_herdr", SOURCE)
 HERDR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HERDR)
 
 
 class HerdrTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="cpcv-h-", dir="/tmp")
+        self.temporary = tempfile.TemporaryDirectory(prefix="ctrl-ccv-h-", dir="/tmp")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.home = self.root / "home with spaces-é"
@@ -68,7 +68,7 @@ class HerdrTests(unittest.TestCase):
                         response(connection)
                     else:
                         payload = response if response is not None else {
-                            "id": "cpcv-paste", "result": {"type": "ok"}
+                            "id": "ctrl-ccv-paste", "result": {"type": "ok"}
                         }
                         connection.sendall(json.dumps(payload).encode() + b"\n")
             except BaseException as error:
@@ -102,7 +102,7 @@ class HerdrTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(requests, [{
-            "id": "cpcv-paste", "method": "pane.send_input",
+            "id": "ctrl-ccv-paste", "method": "pane.send_input",
             "params": {"pane_id": "wA:pZ", "text": str(self.image), "keys": []},
         }])
         self.assertEqual(self.image.read_bytes(), b"synthetic-image")
@@ -123,7 +123,7 @@ class HerdrTests(unittest.TestCase):
                     self.image.touch()
                 elif kind == "broken-link":
                     self.image.symlink_to("missing.png")
-                with self.assertRaisesRegex(HERDR.CpcvError, "no uploaded image"):
+                with self.assertRaisesRegex(HERDR.CtrlCcvError, "no uploaded image"):
                     HERDR.paste()
                 send.assert_not_called()
 
@@ -131,14 +131,14 @@ class HerdrTests(unittest.TestCase):
         for pane in ("", "p1", "%42", "w1:p1\n", "--help"):
             self.context(pane)
             with self.subTest(pane=pane), patch.object(HERDR, "send_paste") as send:
-                with self.assertRaisesRegex(HERDR.CpcvError, "HERDR_ACTIVE_PANE_ID"):
+                with self.assertRaisesRegex(HERDR.CtrlCcvError, "HERDR_ACTIVE_PANE_ID"):
                     HERDR.paste()
                 send.assert_not_called()
 
     def test_missing_socket_does_not_guess_default_server(self):
         self.context("w0:p11")
         del os.environ["HERDR_SOCKET_PATH"]
-        with self.assertRaisesRegex(HERDR.CpcvError, "HERDR_SOCKET_PATH"):
+        with self.assertRaisesRegex(HERDR.CtrlCcvError, "HERDR_SOCKET_PATH"):
             HERDR.paste()
 
     def test_rejects_image_directory_escape_and_control_characters(self):
@@ -149,17 +149,17 @@ class HerdrTests(unittest.TestCase):
         linked.symlink_to(outside, target_is_directory=True)
         for value in (str(outside), str(linked), "relative", str(self.home) + "/bad\npath"):
             self.config.write_text(json.dumps({"managedBy": HERDR.OWNER, "imageDir": value}))
-            with self.subTest(value=value), self.assertRaises(HERDR.CpcvError):
+            with self.subTest(value=value), self.assertRaises(HERDR.CtrlCcvError):
                 HERDR.latest_image(self.home)
 
     def test_rejects_invalid_config_and_linked_config(self):
         for content in ("not json", "[]", '{}', '{"managedBy":"other","imageDir":"/tmp"}'):
             self.config.write_text(content)
-            with self.subTest(content=content), self.assertRaises((HERDR.CpcvError, ValueError)):
+            with self.subTest(content=content), self.assertRaises((HERDR.CtrlCcvError, ValueError)):
                 HERDR.latest_image(self.home)
         self.config.unlink()
         self.config.symlink_to(self.image)
-        with self.assertRaises(HERDR.CpcvError):
+        with self.assertRaises(HERDR.CtrlCcvError):
             HERDR.latest_image(self.home)
 
     def test_rejects_control_characters_after_symlink_resolution(self):
@@ -169,13 +169,13 @@ class HerdrTests(unittest.TestCase):
         linked = self.home / "linked"
         linked.symlink_to(destination, target_is_directory=True)
         self.config.write_text(json.dumps({"managedBy": HERDR.OWNER, "imageDir": str(linked)}))
-        with self.assertRaises(HERDR.CpcvError):
+        with self.assertRaises(HERDR.CtrlCcvError):
             HERDR.latest_image(self.home)
 
     def test_missing_image_sends_notification_without_input(self):
         self.context()
         self.image.unlink()
-        with self.server({"id": "cpcv-notify", "result": {"type": "notification_show", "shown": True}}) as requests:
+        with self.server({"id": "ctrl-ccv-notify", "result": {"type": "notification_show", "shown": True}}) as requests:
             result = subprocess.run(
                 [sys.executable, str(self.helper), "paste"],
                 env=dict(os.environ), capture_output=True, timeout=5,
@@ -190,12 +190,12 @@ class HerdrTests(unittest.TestCase):
         self.context()
         for response in (
             {"id": "wrong", "result": {"type": "ok"}},
-            {"id": "cpcv-paste", "error": {"code": "pane_not_found", "message": "private"}},
-            {"id": "cpcv-paste", "result": {"type": "pong"}},
+            {"id": "ctrl-ccv-paste", "error": {"code": "pane_not_found", "message": "private"}},
+            {"id": "ctrl-ccv-paste", "result": {"type": "pong"}},
             [],
         ):
             with self.subTest(response=response), self.server(response) as requests:
-                with self.assertRaises(HERDR.CpcvError):
+                with self.assertRaises(HERDR.CtrlCcvError):
                     HERDR.paste()
             self.assertEqual(len(requests), 1)
 
@@ -209,7 +209,7 @@ class HerdrTests(unittest.TestCase):
 
         for response in (oversized, lambda c: c.sendall(b"invalid\n"), lambda c: None):
             with self.subTest(response=response), self.server(response) as requests:
-                with self.assertRaises((HERDR.CpcvError, ValueError)):
+                with self.assertRaises((HERDR.CtrlCcvError, ValueError)):
                     HERDR.paste()
             self.assertEqual(len(requests), 1)
 
@@ -218,7 +218,7 @@ class HerdrTests(unittest.TestCase):
         release = threading.Event()
         with patch.object(HERDR, "TIMEOUT", 0.05), self.server(lambda c: release.wait(1)):
             try:
-                with self.assertRaises((HERDR.CpcvError, OSError)):
+                with self.assertRaises((HERDR.CtrlCcvError, OSError)):
                     HERDR.paste()
             finally:
                 release.set()
@@ -231,7 +231,7 @@ class HerdrTests(unittest.TestCase):
                 path.symlink_to(self.image)
             else:
                 path.write_text("not a socket")
-            with self.subTest(linked=linked), self.assertRaises(HERDR.CpcvError):
+            with self.subTest(linked=linked), self.assertRaises(HERDR.CtrlCcvError):
                 HERDR.paste()
             path.unlink()
 
@@ -254,7 +254,7 @@ class HerdrTests(unittest.TestCase):
             path.write_text("unrelated user file")
             other = self.config if path == self.helper else self.helper
             other_original = other.read_bytes()
-            with self.subTest(path=path), self.assertRaises((HERDR.CpcvError, ValueError)):
+            with self.subTest(path=path), self.assertRaises((HERDR.CtrlCcvError, ValueError)):
                 HERDR.install("another-dir")
             self.assertEqual(path.read_text(), "unrelated user file")
             self.assertEqual(other.read_bytes(), other_original)
@@ -263,24 +263,24 @@ class HerdrTests(unittest.TestCase):
 
     def test_install_refuses_symlinked_ancestor_and_invalid_remote_dir(self):
         for remote_dir in ("../outside", "/absolute", "images/../../outside", "bad\npath", "bad;command"):
-            with self.subTest(remote_dir=remote_dir), self.assertRaises(HERDR.CpcvError):
+            with self.subTest(remote_dir=remote_dir), self.assertRaises(HERDR.CtrlCcvError):
                 HERDR.install(remote_dir)
         (self.root / "outside").mkdir()
         (self.home / "linked").symlink_to(self.root / "outside", target_is_directory=True)
-        with self.assertRaises(HERDR.CpcvError):
+        with self.assertRaises(HERDR.CtrlCcvError):
             HERDR.install("linked/images")
         self.assertEqual(list((self.root / "outside").iterdir()), [])
 
 
 class DeploymentTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="cpcv-h-deploy-", dir="/tmp")
+        self.temporary = tempfile.TemporaryDirectory(prefix="ctrl-ccv-h-deploy-", dir="/tmp")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         # Match the actual remote mktemp alphabet. Python's tempfile suffixes
         # can contain underscores, which the deployment transport rejects.
         self.stage = Path(subprocess.check_output(
-            ["mktemp", "-d", "/tmp/cpcv-herdr.XXXXXXXX"], text=True,
+            ["mktemp", "-d", "/tmp/ctrl-ccv-herdr.XXXXXXXX"], text=True,
         ).strip())
         self.addCleanup(lambda: shutil.rmtree(self.stage, ignore_errors=True))
         self.bin = self.root / "bin"
@@ -298,9 +298,9 @@ with open(os.environ["FAKE_LOG"], "a") as stream:
 if pathlib.Path(sys.argv[0]).name == "scp":
     if os.environ.get("FAKE_FAIL") == "copy":
         sys.exit(1)
-    shutil.copyfile(sys.argv[-2], pathlib.Path(os.environ["FAKE_STAGE"]) / "cpcv-herdr.py")
+    shutil.copyfile(sys.argv[-2], pathlib.Path(os.environ["FAKE_STAGE"]) / "ctrl-ccv-herdr.py")
 elif sys.argv[-1].startswith("command -v python3"):
-    print("/tmp/not-a-cpcv-stage" if os.environ.get("FAKE_FAIL") == "stage" else os.environ["FAKE_STAGE"])
+    print("/tmp/not-a-ctrl-ccv-stage" if os.environ.get("FAKE_FAIL") == "stage" else os.environ["FAKE_STAGE"])
 elif " install --remote-dir " in sys.argv[-1]:
     if os.environ.get("FAKE_FAIL") == "install":
         sys.exit(1)

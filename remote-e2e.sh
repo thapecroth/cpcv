@@ -2,13 +2,13 @@
 # Read-only diagnostic for explicitly installed optional remote helpers.
 set -euo pipefail
 
-[ -r "$HOME/.config/cpcv/env" ] && . "$HOME/.config/cpcv/env"
-IMG_DIR="${CPCV_DIR:-$HOME/clipboard-images}"
+[ -r "$HOME/.config/ctrl-ccv/env" ] && . "$HOME/.config/ctrl-ccv/env"
+IMG_DIR="${CTRL_CCV_DIR:-$HOME/clipboard-images}"
 BIN="$HOME/.local/bin"
 
 echo "Image directory: $IMG_DIR"
 echo "Latest image: $(readlink -f "$IMG_DIR/latest.png" 2>/dev/null || true)"
-for helper in cpcv-latest cpcv-xclip cpcv-wl-paste; do
+for helper in ctrl-ccv-latest ctrl-ccv-xclip ctrl-ccv-wl-paste; do
   if [ -x "$BIN/$helper" ]; then
     echo "$helper: $BIN/$helper"
   else
@@ -16,7 +16,7 @@ for helper in cpcv-latest cpcv-xclip cpcv-wl-paste; do
   fi
 done
 
-if [ -x "$BIN/cpcv-xclip" ]; then
-  echo "cpcv-xclip targets:"
-  "$BIN/cpcv-xclip" -o -t TARGETS || true
+if [ -x "$BIN/ctrl-ccv-xclip" ]; then
+  echo "ctrl-ccv-xclip targets:"
+  "$BIN/ctrl-ccv-xclip" -o -t TARGETS || true
 fi

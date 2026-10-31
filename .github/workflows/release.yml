@@ -54,7 +54,7 @@ jobs:
             echo "Tag $TAG does not match VERSION $version." >&2
             exit 1
           }
-          grep -Fq "private let cpcvVersion = \"$version\"" macos/cpcv-macos.swift || {
+          grep -Fq "private let ctrlCcvVersion = \"$version\"" macos/ctrl-ccv-macos.swift || {
             echo 'macOS source version does not match VERSION.' >&2
             exit 1
           }
@@ -114,8 +114,8 @@ jobs:
         with:
           name: release-windows
           path: |
-            dist/cpcv-${{ needs.validate.outputs.tag }}-windows.zip
-            dist/cpcv-${{ needs.validate.outputs.tag }}-windows-setup.exe
+            dist/ctrl-ccv-${{ needs.validate.outputs.tag }}-windows.zip
+            dist/ctrl-ccv-${{ needs.validate.outputs.tag }}-windows-setup.exe
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -136,7 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           bash macos/test-macos.sh
-          bash tests/test-tmux-cpcv.sh
+          bash tests/test-tmux-ctrl-ccv.sh
 
       - name: Build universal macOS bundle
         shell: bash
@@ -149,7 +149,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-macos
-          path: dist/cpcv-${{ needs.validate.outputs.tag }}-macos-universal.zip
+          path: dist/ctrl-ccv-${{ needs.validate.outputs.tag }}-macos-universal.zip
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -181,9 +181,9 @@ jobs:
           set -euo pipefail
 
           assets=(
-            "cpcv-${TAG}-windows.zip"
-            "cpcv-${TAG}-windows-setup.exe"
-            "cpcv-${TAG}-macos-universal.zip"
+            "ctrl-ccv-${TAG}-windows.zip"
+            "ctrl-ccv-${TAG}-windows-setup.exe"
+            "ctrl-ccv-${TAG}-macos-universal.zip"
           )
           for asset in "${assets[@]}"; do
             [[ -f "dist/$asset" && ! -L "dist/$asset" ]] || {
@@ -224,7 +224,7 @@ jobs:
             dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "cpcv $TAG" \
+            --title "ctrl-ccv $TAG" \
             --generate-notes \
             --notes 'Release assets: Windows includes a recommended per-user Setup.exe wizard plus a transparent PowerShell ZIP; macOS includes ad-hoc-signed universal binaries. Verify every asset with SHA256SUMS.txt before installing. The Windows Setup.exe is not Authenticode-signed yet and may trigger SmartScreen. The macOS asset is not Developer ID signed or notarized and may require an explicit Gatekeeper approval.'
 
@@ -234,7 +234,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
-      group: cpcv-homebrew-tap
+      group: ctrl-ccv-homebrew-tap
       cancel-in-progress: false
     permissions:
       contents: read
@@ -262,7 +262,7 @@ jobs:
           }
 
           install -d -m 700 "$HOME/.ssh"
-          key_path="$HOME/.ssh/cpcv-homebrew-tap"
+          key_path="$HOME/.ssh/ctrl-ccv-homebrew-tap"
           printf '%s\n' "$HOMEBREW_TAP_DEPLOY_KEY" > "$key_path"
           chmod 600 "$key_path"
           cat > "$HOME/.ssh/known_hosts" <<'EOF'
@@ -272,7 +272,7 @@ jobs:
           trap 'rm -f -- "$key_path"' EXIT
           export GIT_SSH_COMMAND="ssh -i $key_path -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
           git clone --depth 1 git@github.com:thapecroth/homebrew-cpcv.git tap
-          asset="dist/cpcv-${TAG}-macos-universal.zip"
+          asset="dist/ctrl-ccv-${TAG}-macos-universal.zip"
           [[ -f "$asset" && ! -L "$asset" ]] || {
             echo "Missing macOS release asset: $asset" >&2
             exit 1
@@ -282,15 +282,15 @@ jobs:
           bash packaging/homebrew/render-formula.sh \
             --version "$version" \
             --sha256 "$sha256" \
-            --output tap/Formula/cpcv.rb >/dev/null
-          ruby -c tap/Formula/cpcv.rb
+            --output tap/Formula/ctrl-ccv.rb >/dev/null
+          ruby -c tap/Formula/ctrl-ccv.rb
 
-          git -C tap config user.name 'cpcv release automation'
+          git -C tap config user.name 'ctrl-ccv release automation'
           git -C tap config user.email 'thapecroth@users.noreply.github.com'
-          git -C tap add Formula/cpcv.rb
+          git -C tap add Formula/ctrl-ccv.rb
           if git -C tap diff --cached --quiet; then
             echo 'Homebrew formula is already current.'
             exit 0
           fi
-          git -C tap commit -m "cpcv $TAG"
+          git -C tap commit -m "ctrl-ccv $TAG"
           git -C tap push origin HEAD:main
