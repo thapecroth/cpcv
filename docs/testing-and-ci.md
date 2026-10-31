@@ -20,7 +20,7 @@ The native macOS test entry point is:
 
 ```bash
 bash macos/test-macos.sh
-bash tests/test-tmux-cpcv.sh
+bash tests/test-tmux-ctrl-ccv.sh
 ```
 
 It requires macOS 11 or newer and Xcode Command Line Tools. It compiles

@@ -1,0 +1,57 @@
+class CtrlCcv < Formula
+  desc "Upload copied clipboard images to an SSH target"
+  homepage "https://github.com/thapecroth/ctrl-ccv"
+  url "https://github.com/thapecroth/ctrl-ccv/releases/download/v__VERSION__/ctrl-ccv-v__VERSION__-macos-universal.zip"
+  sha256 "__MACOS_SHA256__"
+  license "MIT"
+
+  depends_on macos: :big_sur
+
+  def install
+    # Homebrew enters the archive's single top-level directory before calling
+    # install, so buildpath is already the ctrl-ccv release root.
+    source_root = buildpath
+    odie "ctrl-ccv release archive is missing its macOS payload" unless (source_root/"macos").directory?
+    libexec.install source_root.children.reject { |entry| entry.basename.to_s == ".brew_home" }
+    bin.mkpath
+
+    wrappers = {
+      "ctrl-ccv" => libexec/"macos/ctrl-ccv-macos-ctl.sh",
+      "ctrl-ccv-setup" => libexec/"macos/ctrl-ccv-homebrew-setup.sh",
+      "ctrl-ccv-deploy-tmux" => libexec/"macos/deploy-remote-tmux-ctrl-ccv-plugin.sh",
+      "ctrl-ccv-deploy-herdr" => libexec/"deploy-herdr.sh",
+    }
+    wrappers.each do |name, target|
+      odie "ctrl-ccv release archive is missing #{target.basename}" unless target.executable?
+      (bin/name).write <<~EOS
+        #!/bin/sh
+        exec "#{target}" "$@"
+      EOS
+      chmod 0755, bin/name
+    end
+  end
+
+  def caveats
+    <<~EOS
+      Finish ctrl-ccv's per-user GUI setup (this does not use sudo):
+        ctrl-ccv-setup
+
+      Then choose the ctrl-ccv menu-bar icon > Settings to configure your SSH target.
+      To enable optional pane-specific tmux paste on that target:
+        ctrl-ccv-deploy-tmux --host image-box
+
+      The remote helper never edits ~/.tmux.conf. Add its printed run-shell line
+      yourself, then reload tmux.
+
+      For Herdr instead (requires Python 3.8+ on the SSH target):
+        ctrl-ccv-deploy-herdr --host image-box
+      Add the printed command binding to the remote Herdr configuration and
+      run herdr server reload-config in that session.
+    EOS
+  end
+
+  test do
+    system "#{libexec}/macos/build/ctrl-ccv-macos", "self-test"
+    system "#{libexec}/macos/build/ctrl-ccv-tray", "self-test"
+  end
+end

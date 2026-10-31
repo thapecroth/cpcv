@@ -1,8 +1,8 @@
 # Herdr image-path paste
 
-cpcv can paste an uploaded image path into a Herdr pane without tmux. The
+ctrl-ccv can paste an uploaded image path into a Herdr pane without tmux. The
 Windows and macOS uploaders work as usual: copy an image locally and wait
-for cpcv to confirm its upload, then press the configured key in Herdr.
+for ctrl-ccv to confirm its upload, then press the configured key in Herdr.
 The image stays on your local clipboard.
 
 The optional helper needs Python 3.8+ on the POSIX SSH host where Herdr's
@@ -21,7 +21,7 @@ bash deploy-herdr.sh --host image-box
 With a Homebrew package containing this integration:
 
 ```bash
-cpcv-deploy-herdr --host image-box
+ctrl-ccv-deploy-herdr --host image-box
 ```
 
 Use your uploader's SSH target and image directory. If you upload to a
@@ -34,27 +34,27 @@ directory in PowerShell. They stage only the helper in a private temporary
 remote directory and remove it after installation:
 
 ```powershell
-$stage = (ssh image-box 'umask 077; mktemp -d /tmp/cpcv-herdr.XXXXXXXX').Trim()
-if ($LASTEXITCODE -ne 0 -or $stage -notmatch '^/tmp/cpcv-herdr\.[A-Za-z0-9]+$') { throw 'Could not stage the Herdr helper' }
+$stage = (ssh image-box 'umask 077; mktemp -d /tmp/ctrl-ccv-herdr.XXXXXXXX').Trim()
+if ($LASTEXITCODE -ne 0 -or $stage -notmatch '^/tmp/ctrl-ccv-herdr\.[A-Za-z0-9]+$') { throw 'Could not stage the Herdr helper' }
 try {
-    scp .\remote\cpcv-herdr.py "image-box:$stage/"
+    scp .\remote\ctrl-ccv-herdr.py "image-box:$stage/"
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy the Herdr helper' }
-    ssh image-box "python3 '$stage/cpcv-herdr.py' install --remote-dir clipboard-images"
+    ssh image-box "python3 '$stage/ctrl-ccv-herdr.py' install --remote-dir clipboard-images"
     if ($LASTEXITCODE -ne 0) { throw 'Could not install the Herdr helper' }
 } finally {
-    ssh image-box "rm -f '$stage/cpcv-herdr.py'; rmdir '$stage'"
+    ssh image-box "rm -f '$stage/ctrl-ccv-herdr.py'; rmdir '$stage'"
 }
 ```
 
 If the source checkout is already on the SSH host, install directly there:
 
 ```bash
-python3 remote/cpcv-herdr.py install --remote-dir clipboard-images
+python3 remote/ctrl-ccv-herdr.py install --remote-dir clipboard-images
 ```
 
 The installer creates only the marked helper at
-`~/.local/lib/cpcv/herdr/cpcv-herdr.py` and private data configuration at
-`~/.config/cpcv/herdr-paste.json`, plus the image directory if needed. It
+`~/.local/lib/ctrl-ccv/herdr/ctrl-ccv-herdr.py` and private data configuration at
+`~/.config/ctrl-ccv/herdr-paste.json`, plus the image directory if needed. It
 refuses unrelated existing files and symlinked installation directories.
 
 ## Enable the binding
@@ -67,8 +67,8 @@ the file. Pick an unused key if `prefix+alt+v` is already assigned:
 [[keys.command]]
 key = "prefix+alt+v"
 type = "shell"
-command = 'python3 "$HOME/.local/lib/cpcv/herdr/cpcv-herdr.py" paste'
-description = "Paste latest cpcv image path"
+command = 'python3 "$HOME/.local/lib/ctrl-ccv/herdr/ctrl-ccv-herdr.py" paste'
+description = "Paste latest ctrl-ccv image path"
 ```
 
 Inside the intended Herdr session, reload the server configuration:
@@ -122,7 +122,7 @@ notifications according to its settings or when no client is attached.
 To inspect a failure, run this inside the intended Herdr pane:
 
 ```bash
-HERDR_ACTIVE_PANE_ID="$HERDR_PANE_ID" python3 "$HOME/.local/lib/cpcv/herdr/cpcv-herdr.py" paste
+HERDR_ACTIVE_PANE_ID="$HERDR_PANE_ID" python3 "$HOME/.local/lib/ctrl-ccv/herdr/ctrl-ccv-herdr.py" paste
 ```
 
 This also attempts a paste into that pane. Check that Python 3 is available,
@@ -133,11 +133,11 @@ context is missing.
 ## Remove
 
 Remove the command binding from your Herdr configuration and reload that
-session. Then remove the two cpcv-owned files after checking their contents:
+session. Then remove the two ctrl-ccv-owned files after checking their contents:
 
 ```bash
-rm ~/.local/lib/cpcv/herdr/cpcv-herdr.py ~/.config/cpcv/herdr-paste.json
-rmdir ~/.local/lib/cpcv/herdr
+rm ~/.local/lib/ctrl-ccv/herdr/ctrl-ccv-herdr.py ~/.config/ctrl-ccv/herdr-paste.json
+rmdir ~/.local/lib/ctrl-ccv/herdr
 ```
 
 Uploaded images and the local uploader remain available.

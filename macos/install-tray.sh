@@ -3,10 +3,10 @@
 set -euo pipefail
 umask 077
 
-readonly label='io.cpcv.tray'
+readonly label='io.ctrl-ccv.tray'
 
 die() {
-  printf 'cpcv tray install: %s\n' "$*" >&2
+  printf 'ctrl-ccv tray install: %s\n' "$*" >&2
   exit 1
 }
 
@@ -15,7 +15,7 @@ usage() {
 Usage: ./macos/install-tray.sh [--prebuilt]
 
 By default, builds the native menu-bar companion from source. With --prebuilt,
-validates and uses macos/build/cpcv-tray from a release bundle without invoking
+validates and uses macos/build/ctrl-ccv-tray from a release bundle without invoking
 swiftc.
 USAGE
 }
@@ -54,7 +54,7 @@ require_macos_11() {
 }
 
 is_managed_plist() {
-  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by cpcv install-tray.sh' "$1"
+  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by ctrl-ccv install-tray.sh' "$1"
 }
 
 job_loaded() {
@@ -62,14 +62,14 @@ job_loaded() {
 }
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-launcher="$script_dir/cpcv-tray.sh"
-controller="$script_dir/cpcv-macos-ctl.sh"
-tmux_helper="$script_dir/deploy-remote-tmux-cpcv-plugin.sh"
-template="$script_dir/io.cpcv.tray.plist.template"
-source_file="$script_dir/cpcv-tray.swift"
+launcher="$script_dir/ctrl-ccv-tray.sh"
+controller="$script_dir/ctrl-ccv-macos-ctl.sh"
+tmux_helper="$script_dir/deploy-remote-tmux-ctrl-ccv-plugin.sh"
+template="$script_dir/io.ctrl-ccv.tray.plist.template"
+source_file="$script_dir/ctrl-ccv-tray.swift"
 build_dir="$script_dir/build"
-tray_bin="$build_dir/cpcv-tray"
-uploader_bin="$build_dir/cpcv-macos"
+tray_bin="$build_dir/ctrl-ccv-tray"
+uploader_bin="$build_dir/ctrl-ccv-macos"
 uid=$(require_macos_gui_user)
 require_macos_11
 domain="gui/$uid"
@@ -80,12 +80,12 @@ plist="$launch_agents/$label.plist"
 
 [[ -x "$launcher" && ! -L "$launcher" ]] || { printf '%s\n' "Missing safe executable launcher: $launcher" >&2; exit 1; }
 [[ -x "$controller" && ! -L "$controller" ]] || { printf '%s\n' "Missing safe executable macOS controller: $controller. Install the macOS uploader first." >&2; exit 1; }
-[[ -x "$tmux_helper" && ! -L "$tmux_helper" ]] || { printf '%s\n' "Missing safe remote tmux helper: $tmux_helper. Update this cpcv checkout." >&2; exit 1; }
+[[ -x "$tmux_helper" && ! -L "$tmux_helper" ]] || { printf '%s\n' "Missing safe remote tmux helper: $tmux_helper. Update this ctrl-ccv checkout." >&2; exit 1; }
 [[ -f "$template" ]] || { printf '%s\n' "Missing template: $template" >&2; exit 1; }
 if (( ! use_prebuilt )); then
   [[ -f "$source_file" && ! -L "$source_file" ]] || { printf '%s\n' "Missing tray source: $source_file" >&2; exit 1; }
   if ! command -v swiftc >/dev/null 2>&1; then
-    printf '%s\n' "cpcv tray requires Apple's Swift compiler. Install it with: xcode-select --install" >&2
+    printf '%s\n' "ctrl-ccv tray requires Apple's Swift compiler. Install it with: xcode-select --install" >&2
     exit 1
   fi
 fi
@@ -99,11 +99,11 @@ if (( use_prebuilt )); then
   "$tray_bin" self-test >/dev/null || { printf '%s\n' 'The bundled tray executable did not pass its self-test.' >&2; exit 1; }
   printf '%s\n' 'Using the bundled prebuilt macOS tray executable (ad-hoc signed; not notarized).'
 else
-  build_tmp=$(mktemp -d "$build_dir/.cpcv-tray-build.XXXXXX")
+  build_tmp=$(mktemp -d "$build_dir/.ctrl-ccv-tray-build.XXXXXX")
   trap 'rm -rf -- "$build_tmp"' EXIT
-  swiftc -O -parse-as-library -framework AppKit "$source_file" -o "$build_tmp/cpcv-tray"
-  chmod 700 "$build_tmp/cpcv-tray"
-  mv -f -- "$build_tmp/cpcv-tray" "$tray_bin"
+  swiftc -O -parse-as-library -framework AppKit "$source_file" -o "$build_tmp/ctrl-ccv-tray"
+  chmod 700 "$build_tmp/ctrl-ccv-tray"
+  mv -f -- "$build_tmp/ctrl-ccv-tray" "$tray_bin"
   rmdir -- "$build_tmp"
   trap - EXIT
 fi
@@ -127,7 +127,7 @@ fi
 escaped_launcher=$(printf '%s' "$launcher" | sed 's/[\\&|]/\\&/g')
 temporary=$(/usr/bin/mktemp "$launch_agents/.${label}.XXXXXX")
 trap '/bin/rm -f -- "$temporary"' EXIT
-sed "s|__CPCV_TRAY_LAUNCHER__|$escaped_launcher|g" "$template" > "$temporary"
+sed "s|__CTRL_CCV_TRAY_LAUNCHER__|$escaped_launcher|g" "$template" > "$temporary"
 /usr/bin/plutil -lint "$temporary" >/dev/null || die 'Generated LaunchAgent plist is invalid.'
 chmod 600 "$temporary"
 if (( existing_managed_plist )) && job_loaded; then
@@ -152,5 +152,5 @@ for _ in {1..5}; do
 done
 ((bootstrapped == 1)) || die "Could not start $label in $domain."
 launchctl kickstart -k "$domain/$label"
-printf '%s\n' "Installed and started the optional cpcv menu-bar companion."
+printf '%s\n' "Installed and started the optional ctrl-ccv menu-bar companion."
 printf '%s\n' "It observes the existing uploader; it does not change SSH settings or upload data during installation."

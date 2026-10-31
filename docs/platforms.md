@@ -1,6 +1,6 @@
 # Platform support
 
-cpcv is a local clipboard-to-SSH utility. It does not need a hosted service, a
+ctrl-ccv is a local clipboard-to-SSH utility. It does not need a hosted service, a
 replacement screenshot app, or an administrator-installed background service.
 
 ## Current support
@@ -26,15 +26,47 @@ checkout.
 
 | Platform | Default private configuration | Example |
 | --- | --- | --- |
-| Windows | `%LOCALAPPDATA%\cpcv\config.psd1` | `cpcv.config.example.psd1` |
-| macOS | `~/Library/Application Support/cpcv/config.json` | `macos/cpcv.macos.config.example.json` |
+| Windows | `%LOCALAPPDATA%\ctrl-ccv\config.psd1` | `ctrl-ccv.config.example.psd1` |
+| macOS | `~/Library/Application Support/ctrl-ccv/config.json` | `macos/ctrl-ccv.macos.config.example.json` |
 
 The macOS parser accepts only JSON data and validates `hostAlias`, relative
 `remoteDir`, optional absolute POSIX `remoteHome`, data-root, size limits,
 timeouts, cache limits, and watchdog timing before launching SSH. A custom
-`CPCV_CONFIG` value must be an absolute local file path. Put credentials
-and `ProxyCommand` rules in your own SSH configuration, never in cpcv
+`CTRL_CCV_CONFIG` value must be an absolute local file path. Put credentials
+and `ProxyCommand` rules in your own SSH configuration, never in ctrl-ccv
 configuration data or source.
+
+## Upgrading across the rename
+
+The project was previously named `cpcv`. The renamed version uses fresh
+`ctrl-ccv` command, service, configuration, and data paths; it does not
+automatically migrate an existing installation.
+
+1. Back up your private settings outside the checkout. Stop and uninstall the
+   old tray and uploader using the old installation's uninstall scripts or,
+   for Windows Setup, its Installed apps entry. Preserve private data and do
+   not run both uploaders together. For Homebrew, run the old package's
+   uninstall scripts before removing its formula, while those scripts are
+   still available.
+2. Install the renamed version. Copy your saved configuration to
+   `%LOCALAPPDATA%\ctrl-ccv\config.psd1` on Windows or
+   `~/Library/Application Support/ctrl-ccv/config.json` on macOS. Review any
+   explicit `DataRoot`/`dataRoot` before starting: move data while stopped and
+   update the path if you want it under the new name.
+3. Update custom environment variables to the `CTRL_CCV_*` prefix, including
+   `CTRL_CCV_CONFIG`. Rerun the new local setup, then explicitly redeploy any
+   tmux, Herdr, or optional X11 integration you use.
+4. Update your user-owned remote startup lines and `@ctrl-ccv-*` tmux
+   options. Remove the previous plugin's startup line and restart the tmux
+   server when convenient to clear its old bindings and status segment.
+   Replace any old Herdr command binding and reload that configuration.
+   Stop/uninstall the old X11 bridge with its original uninstall script
+   before enabling the new one. Verify a fresh image upload and path paste.
+
+The separate Homebrew tap remains `thapecroth/homebrew-cpcv`; its renamed
+formula is `thapecroth/cpcv/ctrl-ccv`. Release automation publishes that
+formula with the next release. Previously published release assets keep
+their original names and checksums.
 
 ## macOS lifecycle
 
@@ -43,8 +75,8 @@ session. A source checkout builds with Xcode Command Line Tools; the portable
 release bundle supplies prebuilt universal binaries and uses `--prebuilt` to
 avoid that compiler requirement. It uses only these project-owned user labels:
 
-- `io.cpcv.guardian` runs the native guardian in `gui/$UID`.
-- `io.cpcv.tray` runs the optional menu-bar companion in `gui/$UID`.
+- `io.ctrl-ccv.guardian` runs the native guardian in `gui/$UID`.
+- `io.ctrl-ccv.tray` runs the optional menu-bar companion in `gui/$UID`.
 
 `macos/install-macos.sh` builds the native uploader with `swiftc` by default,
 or validates a release bundle's prebuilt executable with `--prebuilt`; it then
@@ -55,16 +87,16 @@ missing GUI domain, a symlinked target, and an unrelated existing LaunchAgent
 label.
 The guardian and optional tray have a fixed PATH containing standard system
 locations plus the Apple Silicon and Intel Homebrew locations, so an SSH
-`ProxyCommand` can use tools such as `cloudflared` when cpcv runs in the
+`ProxyCommand` can use tools such as `cloudflared` when ctrl-ccv runs in the
 background.
 
-The `thapecroth/cpcv/cpcv` Homebrew formula installs the verified macOS release
+The `thapecroth/cpcv/ctrl-ccv` Homebrew formula installs the verified macOS release
 bundle but deliberately does not create a LaunchAgent during `brew install`.
-Run `cpcv-setup` afterward to create the same current-user uploader and
-menu-bar services. `brew upgrade thapecroth/cpcv/cpcv` should likewise be
-followed by `cpcv-setup`.
+Run `ctrl-ccv-setup` afterward to create the same current-user uploader and
+menu-bar services. `brew upgrade thapecroth/cpcv/ctrl-ccv` should likewise be
+followed by `ctrl-ccv-setup`.
 
-Use `macos/cpcv-macos-ctl.sh` for fixed local actions only:
+Use `macos/ctrl-ccv-macos-ctl.sh` for fixed local actions only:
 
 ```text
 status | start | stop | restart | logs | upload | config | settings-read | settings-save | doctor
@@ -79,9 +111,9 @@ default.
 
 The tray is a local status/control client, never a second uploader.
 
-- Windows uses a current-user `Local\Cpcv-Tray-*` mutex; a duplicate
+- Windows uses a current-user `Local\CtrlCcv-Tray-*` mutex; a duplicate
   launch exits harmlessly (including a second checkout for the same user).
-- macOS uses a single managed `io.cpcv.tray` LaunchAgent and calls the
+- macOS uses a single managed `io.ctrl-ccv.tray` LaunchAgent and calls the
   project-owned control script with fixed action names.
 
 Both interfaces show bounded, redacted state, copy the last validated remote
@@ -105,7 +137,7 @@ image or create/change a remote file. It may honor a user-configured SSH
 multiplexed transport, so it does not claim to force a new network handshake.
 A successful check proves the connection stage only, then enables a deliberate
 clipboard retry. For interactive authentication—including approval or
-one-time-code workflows—the assistant explains that cpcv cannot answer the
+one-time-code workflows—the assistant explains that ctrl-ccv cannot answer the
 prompt and directs the customer to their normal SSH workflow without exposing
 or collecting a credential.
 
@@ -135,8 +167,8 @@ tooltip, or holds SSH credentials.
 On Windows, **Settings…** is the normal way to change the SSH target, remote
 folder, timing, and storage limits. It validates the configuration before
 saving it and restarts the project-owned local service so a changed target takes
-effect. The form calls out field-level `CPCV_*` overrides that remain effective,
-as well as `CPCV_CONFIG` when it selects a non-default settings file. **View recent activity…**
+effect. The form calls out field-level `CTRL_CCV_*` overrides that remain effective,
+as well as `CTRL_CCV_CONFIG` when it selects a non-default settings file. **View recent activity…**
 shows a bounded, redacted tail of the local activity log rather than opening the
 raw log or `config.psd1` in an editor.
 
@@ -148,10 +180,10 @@ Alt-V + macOS Ctrl-V** preset, which binds both tmux `root` keys (`M-v` and
 `C-v`) on the shared server. This does not attempt to infer a client's
 operating system. The portable `prefix`, then `v` binding, a custom prefix key,
 and raw `Ctrl-V`-only remain available. The action installs or updates only
-cpcv-owned remote plugin and configuration files after the user chooses
+ctrl-ccv-owned remote plugin and configuration files after the user chooses
 **Apply**. It does not edit `~/.tmux.conf`, shell startup files, or terminal
 keybindings. If a default tmux server is already running, the action reloads
-cpcv in that server; the user must still copy the displayed `run-shell` line
+ctrl-ccv in that server; the user must still copy the displayed `run-shell` line
 into their own tmux configuration for the integration to survive a tmux restart.
 
 On macOS, the everyday menu contains a disabled status row, **Copy Last Image
@@ -196,18 +228,18 @@ when user-systemd lingering is disabled because services can stop after logout.
 Run the remote test script after an upload to compare the X11 clipboard bytes
 with `latest.png` before testing the Codex TUI manually.
 
-The installed `cpcv-codex-x11-uninstall` command disables and removes only
+The installed `ctrl-ccv-codex-x11-uninstall` command disables and removes only
 the two marked user units, bridge files, Xauthority data, and managed zsh
-block. It preserves uploaded images and the core cpcv configuration.
+block. It preserves uploaded images and the core ctrl-ccv configuration.
 
 ## Optional tmux path paste
 
-`cpcv.tmux` inserts the configured remote `latest.png` path into the pane
+`ctrl-ccv.tmux` inserts the configured remote `latest.png` path into the pane
 that triggered it, using a transient tmux buffer. It does not change an OS
 clipboard. Source the plugin's printed `run-shell` line in a user-owned tmux
 config. Its no-configuration fallback is the tmux prefix followed by `v`
 (normally `Ctrl-B`, then `v`). Because that fallback is in tmux's `prefix`
-table, cpcv does not capture raw local paste keys such as `Cmd-V`, `Ctrl-V`,
+table, ctrl-ccv does not capture raw local paste keys such as `Cmd-V`, `Ctrl-V`,
 or `Ctrl-Shift-V`.
 
 This is deliberately not selected by the client operating system. A remote
@@ -216,37 +248,37 @@ once, and terminal identity is not a reliable OS signal. **Configure tmux path
 insertion…** therefore can save the paired `root`/`M-v` (Windows Alt-V) and
 `root`/`C-v` (macOS Ctrl-V) bindings together, alongside its portable,
 custom-prefix, and raw `Ctrl-V`-only alternatives. Applying the action updates
-only marked cpcv files and, when available, reloads the default running tmux
+only marked ctrl-ccv files and, when available, reloads the default running tmux
 server; it never edits the user-owned `~/.tmux.conf`. Copy the one displayed
 `run-shell` line into that file yourself to make the plugin load in future
 sessions.
 
 Explicit user-owned tmux options take precedence over the tray selection. If
-the default key is already bound, cpcv leaves it unchanged; set both
-`@cpcv-paste-table prefix` and `@cpcv-paste-key` to an unused key before
+the default key is already bound, ctrl-ccv leaves it unchanged; set both
+`@ctrl-ccv-paste-table prefix` and `@ctrl-ccv-paste-key` to an unused key before
 sourcing the plugin. For example:
 
 ```tmux
-set -g @cpcv-paste-table prefix
-set -g @cpcv-paste-key p
-run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
+set -g @ctrl-ccv-paste-table prefix
+set -g @ctrl-ccv-paste-key p
+run-shell ~/.local/lib/ctrl-ccv/tmux/ctrl-ccv.tmux
 ```
 
 For upgrade compatibility, an existing configuration that sets only
-`@cpcv-paste-key` retains the former root-table behavior. Add
-`@cpcv-paste-table prefix` explicitly to move that configuration to the
-portable shortcut. Remove or change explicit `@cpcv-paste-*` options if you
+`@ctrl-ccv-paste-key` retains the former root-table behavior. Add
+`@ctrl-ccv-paste-table prefix` explicitly to move that configuration to the
+portable shortcut. Remove or change explicit `@ctrl-ccv-paste-*` options if you
 want the desktop action's saved selection to control the binding again. While
 an explicit option is active on the default server, the action reports that
-override and leaves remote cpcv files unchanged.
+override and leaves remote ctrl-ccv files unchanged.
 
 Raw `Ctrl-V` is available only as an explicit opt-in, whether by itself or as
 the macOS half of the cross-platform preset:
 
 ```tmux
-set -g @cpcv-paste-table root
-set -g @cpcv-paste-key C-v
-run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux
+set -g @ctrl-ccv-paste-table root
+set -g @ctrl-ccv-paste-key C-v
+run-shell ~/.local/lib/ctrl-ccv/tmux/ctrl-ccv.tmux
 ```
 
 Use that mode only when the terminal is configured to forward `Ctrl-V` to
@@ -258,11 +290,11 @@ leaving raw `Ctrl-V` for macOS clients that forward it. Both keys are global to
 the shared tmux server—not OS-detected or per-client—and both desktop apps make
 the same choice available without editing `~/.tmux.conf`.
 
-The plugin appends `cpcv · 2 sec ago` to tmux's right status area. This is
+The plugin appends `ctrl-ccv · 2 sec ago` to tmux's right status area. This is
 the age of `latest.png` on the target server, calculated entirely on that
 server. The first plugin load sets tmux's shared status interval to two seconds
-and later respects a user-managed interval. Set `@cpcv-status off` to hide it or
-`@cpcv-status-refresh 5` before sourcing the plugin to change its default
+and later respects a user-managed interval. Set `@ctrl-ccv-status off` to hide it or
+`@ctrl-ccv-status-refresh 5` before sourcing the plugin to change its default
 refresh interval. The macOS Doctor checks that host and target clocks differ
 by no more than five seconds.
 
@@ -304,13 +336,13 @@ match before successful local upload state is written.
 GitHub Releases contain `SHA256SUMS.txt`, a transparent Windows PowerShell ZIP,
 a per-user Windows `Setup.exe`, and a macOS universal ZIP. The Setup EXE is an
 Inno Setup wizard installed under the current user's local app area; it does
-not request administrator privileges, preserves private cpcv data by default,
+not request administrator privileges, preserves private ctrl-ccv data by default,
 and offers remote tmux helpers only as an opt-in task. It is not
 Authenticode-signed yet, so SmartScreen can warn about it. Verify its checksum
 before proceeding.
 
 The `thapecroth/homebrew-cpcv` tap renders a formula for the exact macOS ZIP
-and SHA-256 from each release. The formula exposes `cpcv-setup` rather than
+and SHA-256 from each release. The formula exposes `ctrl-ccv-setup` rather than
 starting GUI services during `brew install`.
 
 The macOS asset contains source plus ad-hoc-signed universal `arm64` and

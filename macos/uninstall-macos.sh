@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Remove only cpcv's per-user macOS LaunchAgent.
+# Remove only ctrl-ccv's per-user macOS LaunchAgent.
 # Data, configuration, cached images, logs, and the compiled executable remain
 # in place so a future install can resume without losing user-owned settings.
 set -euo pipefail
 IFS=$'\n\t'
 
-readonly label='io.cpcv.guardian'
+readonly label='io.ctrl-ccv.guardian'
 
 die() {
-  printf 'cpcv uninstall: %s\n' "$*" >&2
+  printf 'ctrl-ccv uninstall: %s\n' "$*" >&2
   exit 1
 }
 
@@ -43,7 +43,7 @@ launch_agents="$home_dir/Library/LaunchAgents"
 plist="$launch_agents/$label.plist"
 
 is_managed_plist() {
-  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by cpcv install-macos.sh' "$1"
+  [[ -f "$1" && ! -L "$1" ]] && /usr/bin/grep -Fq 'Managed by ctrl-ccv install-macos.sh' "$1"
 }
 
 job_loaded() {
@@ -67,5 +67,5 @@ if [[ -e "$plist" ]]; then
   /bin/rm -f -- "$plist"
 fi
 
-printf '%s\n' 'Removed the cpcv LaunchAgent from this GUI session.'
+printf '%s\n' 'Removed the ctrl-ccv LaunchAgent from this GUI session.'
 printf '%s\n' 'Preserved configuration, logs, cache, and the compiled executable.'

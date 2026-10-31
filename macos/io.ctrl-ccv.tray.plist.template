@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Managed by ctrl-ccv install-tray.sh. Do not put a shell command here. -->
+  <key>Label</key>
+  <string>io.ctrl-ccv.tray</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__CTRL_CCV_TRAY_LAUNCHER__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>

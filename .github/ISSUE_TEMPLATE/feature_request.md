@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an improvement to cpcv
+about: Suggest an improvement to ctrl-ccv
 title: "feature: "
 labels: enhancement
 assignees: ''

@@ -1,26 +1,26 @@
 # End-to-end Windows upload-pipeline test using isolated local executables.
 #
 # This deliberately does not contact an SSH host, modify the real clipboard,
-# or touch the configured cpcv data directory. It does exercise the real
+# or touch the configured ctrl-ccv data directory. It does exercise the real
 # PNG/cache/hash path, process launcher, SSH/SCP argument construction, fake
 # remote copy/latest update, retry state, and copy-path result end to end.
 $ErrorActionPreference = "Stop"
 
-function Assert-CpcvE2E([bool]$Condition, [string]$Message) {
+function Assert-CtrlCcvE2E([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
 $root = Split-Path $PSScriptRoot -Parent
-. (Join-Path $root "cpcv-core.ps1")
+. (Join-Path $root "ctrl-ccv-core.ps1")
 $script:testE2EMutexSuffix = [Guid]::NewGuid().ToString("N")
-function Get-CpcvMutexName { param([string]$Purpose) return "Local\CpcvE2ETest-$Purpose-$script:testE2EMutexSuffix" }
+function Get-CtrlCcvMutexName { param([string]$Purpose) return "Local\CtrlCcvE2ETest-$Purpose-$script:testE2EMutexSuffix" }
 
-$tempRoot = Join-Path $env:TEMP ("cpcv-e2e-{0}" -f [Guid]::NewGuid())
+$tempRoot = Join-Path $env:TEMP ("ctrl-ccv-e2e-{0}" -f [Guid]::NewGuid())
 $originalPath = $env:PATH
-$originalRemoteRoot = $env:CPCV_E2E_REMOTE_ROOT
-$originalLogPath = $env:CPCV_E2E_LOG_PATH
-$originalFailure = $env:CPCV_E2E_FAILURE
-$originalConfig = $script:CpcvConfig
+$originalRemoteRoot = $env:CTRL_CCV_E2E_REMOTE_ROOT
+$originalLogPath = $env:CTRL_CCV_E2E_LOG_PATH
+$originalFailure = $env:CTRL_CCV_E2E_FAILURE
+$originalConfig = $script:CtrlCcvConfig
 try {
     $bin = Join-Path $tempRoot "bin"
     $remoteRoot = Join-Path $tempRoot "remote"
@@ -29,7 +29,7 @@ try {
 
     # Compile two small local executables named ssh.exe and scp.exe. They
     # mimic only the exact harmless commands this test sends and record argv
-    # as NUL-delimited fields. This proves that cpcv passes each value as
+    # as NUL-delimited fields. This proves that ctrl-ccv passes each value as
     # an argument rather than creating a local shell command.
     $fakeOpenSsh = @'
 using System;
@@ -38,19 +38,19 @@ using System.IO;
 
 public static class FakeOpenSsh {
     private static void Log(string executable, string[] args) {
-        string log = Environment.GetEnvironmentVariable("CPCV_E2E_LOG_PATH");
+        string log = Environment.GetEnvironmentVariable("CTRL_CCV_E2E_LOG_PATH");
         File.AppendAllText(log, executable + "\n" + String.Join("\0", args) + "\n");
     }
 
     public static int Main(string[] args) {
-        string root = Environment.GetEnvironmentVariable("CPCV_E2E_REMOTE_ROOT");
+        string root = Environment.GetEnvironmentVariable("CTRL_CCV_E2E_REMOTE_ROOT");
         string executable = Path.GetFileName(Process.GetCurrentProcess().MainModule.FileName).ToLowerInvariant();
         if (String.IsNullOrEmpty(root) || (executable != "ssh.exe" && executable != "scp.exe")) {
             Console.Error.WriteLine("invalid isolated e2e harness invocation");
             return 64;
         }
         Log(executable, args);
-        string failure = Environment.GetEnvironmentVariable("CPCV_E2E_FAILURE") ?? "";
+        string failure = Environment.GetEnvironmentVariable("CTRL_CCV_E2E_FAILURE") ?? "";
         if (failure == "ssh-banner" && executable == "ssh.exe") {
             Console.Error.WriteLine("Connection timed out during banner exchange https://example.test/callback?token=e2e-secret");
             return 255;
@@ -85,7 +85,7 @@ public static class FakeOpenSsh {
             string source = Path.Combine(directory, leaf);
             if (!File.Exists(source)) { return 68; }
             File.Copy(source, Path.Combine(directory, "latest.png"), true);
-            Console.WriteLine("CPCV_UPLOAD_OK /e2e-home/clipboard-images/" + leaf);
+            Console.WriteLine("CTRL_CCV_UPLOAD_OK /e2e-home/clipboard-images/" + leaf);
             return 0;
         }
         return 69;
@@ -97,12 +97,12 @@ public static class FakeOpenSsh {
     Copy-Item -LiteralPath $fakeExecutable -Destination (Join-Path $bin "ssh.exe")
     Copy-Item -LiteralPath $fakeExecutable -Destination (Join-Path $bin "scp.exe")
 
-    $env:CPCV_E2E_REMOTE_ROOT = $remoteRoot
-    $env:CPCV_E2E_LOG_PATH = $logPath
-    $env:CPCV_E2E_FAILURE = ""
+    $env:CTRL_CCV_E2E_REMOTE_ROOT = $remoteRoot
+    $env:CTRL_CCV_E2E_LOG_PATH = $logPath
+    $env:CTRL_CCV_E2E_FAILURE = ""
     $env:PATH = "$bin;$originalPath"
 
-    $script:CpcvConfig = @{
+    $script:CtrlCcvConfig = @{
         HostAlias = "e2e-host"; RemoteDir = "clipboard-images"; RemoteHome = "/e2e-home"; DataRoot = $tempRoot
         LocalCache = (Join-Path $tempRoot "cache"); StateFile = (Join-Path $tempRoot "last-hash.txt")
         LastRemotePathFile = (Join-Path $tempRoot "last-remote-path.txt"); LogFile = (Join-Path $tempRoot "watch.log")
@@ -116,74 +116,74 @@ public static class FakeOpenSsh {
     $script:e2eBytes = [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLw8QAAAABJRU5ErkJggg==")
     $script:e2eClipboardValue = "image-clipboard-preserved"
     function Get-ClipboardImageBytes { return $script:e2eBytes }
-    function Test-CpcvClipboardHash { param([string]$ExpectedHash) return ((Get-BytesHash -Bytes $script:e2eBytes) -eq $ExpectedHash) }
+    function Test-CtrlCcvClipboardHash { param([string]$ExpectedHash) return ((Get-BytesHash -Bytes $script:e2eBytes) -eq $ExpectedHash) }
     function Set-Clipboard { param([string]$Value) $script:e2eClipboardValue = $Value }
 
     $first = Publish-ClipboardImage -Force
-    Assert-CpcvE2E $first.Ok "The isolated first upload failed: $($first.Reason) $($first.Detail)"
-    Assert-CpcvE2E ($first.Reason -eq "uploaded") "The first upload did not report uploaded."
-    Assert-CpcvE2E ($first.RemotePath -match '^/e2e-home/clipboard-images/clip-[a-f0-9]{64}\.png$') "The returned remote path was unsafe or unexpected."
-    Assert-CpcvE2E ($script:e2eClipboardValue -eq "image-clipboard-preserved") "An automatic upload replaced the image clipboard with text."
-    Assert-CpcvE2E (Test-Path -LiteralPath $first.LocalFile) "The local cache file was not retained."
+    Assert-CtrlCcvE2E $first.Ok "The isolated first upload failed: $($first.Reason) $($first.Detail)"
+    Assert-CtrlCcvE2E ($first.Reason -eq "uploaded") "The first upload did not report uploaded."
+    Assert-CtrlCcvE2E ($first.RemotePath -match '^/e2e-home/clipboard-images/clip-[a-f0-9]{64}\.png$') "The returned remote path was unsafe or unexpected."
+    Assert-CtrlCcvE2E ($script:e2eClipboardValue -eq "image-clipboard-preserved") "An automatic upload replaced the image clipboard with text."
+    Assert-CtrlCcvE2E (Test-Path -LiteralPath $first.LocalFile) "The local cache file was not retained."
 
     $remoteFile = Join-Path $remoteRoot ("clipboard-images\" + [IO.Path]::GetFileName($first.LocalFile))
     $latestFile = Join-Path $remoteRoot "clipboard-images\latest.png"
-    Assert-CpcvE2E (Test-Path -LiteralPath $remoteFile) "The isolated SCP destination was not created."
-    Assert-CpcvE2E (Test-Path -LiteralPath $latestFile) "The isolated latest.png update was not created."
-    Assert-CpcvE2E ((Get-FileHash -LiteralPath $remoteFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $first.LocalFile -Algorithm SHA256).Hash) "The uploaded remote bytes differ from the local cached PNG."
-    Assert-CpcvE2E ((Get-FileHash -LiteralPath $latestFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $remoteFile -Algorithm SHA256).Hash) "latest.png does not match the uploaded PNG."
+    Assert-CtrlCcvE2E (Test-Path -LiteralPath $remoteFile) "The isolated SCP destination was not created."
+    Assert-CtrlCcvE2E (Test-Path -LiteralPath $latestFile) "The isolated latest.png update was not created."
+    Assert-CtrlCcvE2E ((Get-FileHash -LiteralPath $remoteFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $first.LocalFile -Algorithm SHA256).Hash) "The uploaded remote bytes differ from the local cached PNG."
+    Assert-CtrlCcvE2E ((Get-FileHash -LiteralPath $latestFile -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $remoteFile -Algorithm SHA256).Hash) "latest.png does not match the uploaded PNG."
 
-    $watchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\cpcv-watch.ps1") -Raw
-    $nowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\cpcv-now.ps1") -Raw
-    Assert-CpcvE2E ($watchSource -notmatch 'Publish-ClipboardImage\s+-CopyPath') "The automatic watcher still requests clipboard text replacement."
-    Assert-CpcvE2E ($nowSource -notmatch 'Publish-ClipboardImage\s+-CopyPath') "The one-shot uploader still requests clipboard text replacement."
+    $watchSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\ctrl-ccv-watch.ps1") -Raw
+    $nowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "..\ctrl-ccv-now.ps1") -Raw
+    Assert-CtrlCcvE2E ($watchSource -notmatch 'Publish-ClipboardImage\s+-CopyPath') "The automatic watcher still requests clipboard text replacement."
+    Assert-CtrlCcvE2E ($nowSource -notmatch 'Publish-ClipboardImage\s+-CopyPath') "The one-shot uploader still requests clipboard text replacement."
 
     $operations = Get-Content -LiteralPath $logPath
-    Assert-CpcvE2E ($operations.Count -eq 6) "Expected three isolated process invocations (six log lines), found $($operations.Count)."
-    Assert-CpcvE2E ($operations[0] -eq "ssh.exe" -and $operations[2] -eq "scp.exe" -and $operations[4] -eq "ssh.exe") "The upload did not invoke SSH, SCP, then SSH in order."
+    Assert-CtrlCcvE2E ($operations.Count -eq 6) "Expected three isolated process invocations (six log lines), found $($operations.Count)."
+    Assert-CtrlCcvE2E ($operations[0] -eq "ssh.exe" -and $operations[2] -eq "scp.exe" -and $operations[4] -eq "ssh.exe") "The upload did not invoke SSH, SCP, then SSH in order."
     $argv = @($operations | Where-Object { $_ -ne "ssh.exe" -and $_ -ne "scp.exe" } | ForEach-Object { $_ -split [char]0 })
-    Assert-CpcvE2E ($argv -contains "e2e-host") "The expected generic host argument was not passed to the isolated transport."
-    Assert-CpcvE2E ($argv -contains "mkdir -p `$HOME/clipboard-images") "mkdir was not passed as one fixed remote command argument."
-    Assert-CpcvE2E ($argv -notcontains "cmd.exe") "The upload pipeline unexpectedly invoked a local shell."
+    Assert-CtrlCcvE2E ($argv -contains "e2e-host") "The expected generic host argument was not passed to the isolated transport."
+    Assert-CtrlCcvE2E ($argv -contains "mkdir -p `$HOME/clipboard-images") "mkdir was not passed as one fixed remote command argument."
+    Assert-CtrlCcvE2E ($argv -notcontains "cmd.exe") "The upload pipeline unexpectedly invoked a local shell."
 
     # A locally simulated transport failure must return, leave state retryable,
     # and recover cleanly once transport is restored.
     $script:e2eBytes = $script:e2eBytes + [byte]0
-    $env:CPCV_E2E_FAILURE = "ssh.exe"
+    $env:CTRL_CCV_E2E_FAILURE = "ssh.exe"
     $failed = Publish-ClipboardImage -Force
-    Assert-CpcvE2E (-not $failed.Ok -and $failed.Reason -eq "ssh-mkdir-failed") "A failed SSH mkdir was not surfaced as a retryable upload failure."
-    $failedUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
-    Assert-CpcvE2E ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-failed") "The isolated failed upload did not persist a safe tray status."
-    $env:CPCV_E2E_FAILURE = ""
+    Assert-CtrlCcvE2E (-not $failed.Ok -and $failed.Reason -eq "ssh-mkdir-failed") "A failed SSH mkdir was not surfaced as a retryable upload failure."
+    $failedUploadStatus = Get-CtrlCcvUploadStatusInfo -Path $script:CtrlCcvConfig.UploadStatusFile
+    Assert-CtrlCcvE2E ($failedUploadStatus -and $failedUploadStatus.Result -eq "failed" -and $failedUploadStatus.Reason -eq "ssh-mkdir-failed") "The isolated failed upload did not persist a safe tray status."
+    $env:CTRL_CCV_E2E_FAILURE = ""
     $recovered = Publish-ClipboardImage -Force
-    Assert-CpcvE2E ($recovered.Ok -and $recovered.Reason -eq "uploaded") "The upload did not recover after the isolated transport failure."
-    Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.LastRemotePathFile -Raw).Trim() -eq $recovered.RemotePath) "Recovered upload did not commit latest-path state."
-    $recoveredUploadStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
-    Assert-CpcvE2E ($recoveredUploadStatus -and $recoveredUploadStatus.Result -eq "succeeded") "The isolated recovered upload did not clear its tray failure status."
+    Assert-CtrlCcvE2E ($recovered.Ok -and $recovered.Reason -eq "uploaded") "The upload did not recover after the isolated transport failure."
+    Assert-CtrlCcvE2E ((Get-Content -LiteralPath $script:CtrlCcvConfig.LastRemotePathFile -Raw).Trim() -eq $recovered.RemotePath) "Recovered upload did not commit latest-path state."
+    $recoveredUploadStatus = Get-CtrlCcvUploadStatusInfo -Path $script:CtrlCcvConfig.UploadStatusFile
+    Assert-CtrlCcvE2E ($recoveredUploadStatus -and $recoveredUploadStatus.Result -eq "succeeded") "The isolated recovered upload did not clear its tray failure status."
 
     # A realistic unattended-connection banner timeout must retain only its
     # controlled diagnostic token. The fake stderr includes a secret-like URL
     # solely to prove it cannot reach persistent status or customer UI state.
     $script:e2eBytes = $script:e2eBytes + [byte]1
-    $env:CPCV_E2E_FAILURE = "ssh-banner"
+    $env:CTRL_CCV_E2E_FAILURE = "ssh-banner"
     $bannerFailed = Publish-ClipboardImage -Force
-    Assert-CpcvE2E (-not $bannerFailed.Ok -and $bannerFailed.Reason -eq "ssh-mkdir-connect-timeout") "A banner-exchange timeout was not classified as an early SSH connection failure."
-    $bannerStatus = Get-CpcvUploadStatusInfo -Path $script:CpcvConfig.UploadStatusFile
-    Assert-CpcvE2E ($bannerStatus -and $bannerStatus.Result -eq "failed" -and $bannerStatus.Reason -eq "ssh-mkdir-connect-timeout") "A banner-exchange timeout did not persist its controlled status token."
-    Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.UploadStatusFile -Raw) -notmatch 'e2e-secret|e2e-host|clipboard-images') "A banner-exchange failure exposed private transport or configuration data in status."
-    Assert-CpcvE2E ((Get-Content -LiteralPath $script:CpcvConfig.LogFile -Raw) -notmatch 'e2e-secret') "A banner-exchange failure did not redact a secret-like transport URL in activity logging."
-    $env:CPCV_E2E_FAILURE = ""
+    Assert-CtrlCcvE2E (-not $bannerFailed.Ok -and $bannerFailed.Reason -eq "ssh-mkdir-connect-timeout") "A banner-exchange timeout was not classified as an early SSH connection failure."
+    $bannerStatus = Get-CtrlCcvUploadStatusInfo -Path $script:CtrlCcvConfig.UploadStatusFile
+    Assert-CtrlCcvE2E ($bannerStatus -and $bannerStatus.Result -eq "failed" -and $bannerStatus.Reason -eq "ssh-mkdir-connect-timeout") "A banner-exchange timeout did not persist its controlled status token."
+    Assert-CtrlCcvE2E ((Get-Content -LiteralPath $script:CtrlCcvConfig.UploadStatusFile -Raw) -notmatch 'e2e-secret|e2e-host|clipboard-images') "A banner-exchange failure exposed private transport or configuration data in status."
+    Assert-CtrlCcvE2E ((Get-Content -LiteralPath $script:CtrlCcvConfig.LogFile -Raw) -notmatch 'e2e-secret') "A banner-exchange failure did not redact a secret-like transport URL in activity logging."
+    $env:CTRL_CCV_E2E_FAILURE = ""
     $bannerRecovered = Publish-ClipboardImage -Force
-    Assert-CpcvE2E ($bannerRecovered.Ok -and $bannerRecovered.Reason -eq "uploaded") "The upload did not recover after the isolated banner-exchange timeout."
+    Assert-CtrlCcvE2E ($bannerRecovered.Ok -and $bannerRecovered.Reason -eq "uploaded") "The upload did not recover after the isolated banner-exchange timeout."
 }
 finally {
     $env:PATH = $originalPath
-    $env:CPCV_E2E_REMOTE_ROOT = $originalRemoteRoot
-    $env:CPCV_E2E_LOG_PATH = $originalLogPath
-    $env:CPCV_E2E_FAILURE = $originalFailure
-    $script:CpcvConfig = $originalConfig
+    $env:CTRL_CCV_E2E_REMOTE_ROOT = $originalRemoteRoot
+    $env:CTRL_CCV_E2E_LOG_PATH = $originalLogPath
+    $env:CTRL_CCV_E2E_FAILURE = $originalFailure
+    $script:CtrlCcvConfig = $originalConfig
     Remove-Item -Path Function:\Get-ClipboardImageBytes -ErrorAction SilentlyContinue
-    Remove-Item -Path Function:\Test-CpcvClipboardHash -ErrorAction SilentlyContinue
+    Remove-Item -Path Function:\Test-CtrlCcvClipboardHash -ErrorAction SilentlyContinue
     Remove-Item -Path Function:\Set-Clipboard -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $tempRoot) { Remove-Item -LiteralPath $tempRoot -Recurse -Force }
 }

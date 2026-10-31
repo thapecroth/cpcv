@@ -8,7 +8,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 die() {
-  printf 'cpcv macOS test: %s\n' "$*" >&2
+  printf 'ctrl-ccv macOS test: %s\n' "$*" >&2
   exit 1
 }
 
@@ -23,9 +23,9 @@ case "$script_path" in
   *) script_parent='.' ;;
 esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
-source_file="$script_dir/cpcv-macos.swift"
-tray_source="$script_dir/cpcv-tray.swift"
-tmux_helper="$script_dir/deploy-remote-tmux-cpcv-plugin.sh"
+source_file="$script_dir/ctrl-ccv-macos.swift"
+tray_source="$script_dir/ctrl-ccv-tray.swift"
+tmux_helper="$script_dir/deploy-remote-tmux-ctrl-ccv-plugin.sh"
 version_file="$script_dir/../VERSION"
 
 [[ -f "$source_file" && ! -L "$source_file" ]] || die "Missing native source: $source_file"
@@ -35,13 +35,13 @@ version_file="$script_dir/../VERSION"
 release_version=$(tr -d '\r\n' < "$version_file")
 [[ "$release_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
   die 'VERSION is not stable SemVer.'
-/usr/bin/grep -Fq "private let cpcvVersion = \"$release_version\"" "$source_file" || \
+/usr/bin/grep -Fq "private let ctrlCcvVersion = \"$release_version\"" "$source_file" || \
   die 'VERSION does not match the native macOS source version.'
 /bin/bash "$script_dir/install-macos.sh" --help | /usr/bin/grep -Fq -- '--prebuilt' || \
   die 'macOS installer does not document the prebuilt release path.'
 /bin/bash "$script_dir/install-tray.sh" --help | /usr/bin/grep -Fq -- '--prebuilt' || \
   die 'macOS tray installer does not document the prebuilt release path.'
-/bin/bash "$script_dir/cpcv-homebrew-setup.sh" --help | /usr/bin/grep -Fq -- 'Usage: cpcv-setup' || \
+/bin/bash "$script_dir/ctrl-ccv-homebrew-setup.sh" --help | /usr/bin/grep -Fq -- 'Usage: ctrl-ccv-setup' || \
   die 'Homebrew setup helper does not document its fixed setup path.'
 
 for shell_script in "$script_dir"/*.sh; do
@@ -84,16 +84,16 @@ for managed_script in install-macos.sh uninstall-macos.sh install-tray.sh uninst
   /usr/bin/grep -Fq 'Refusing to unload an existing' "$script_dir/$managed_script" || \
     die "Missing LaunchAgent ownership guard: $managed_script"
 done
-/usr/bin/grep -Fq 'owned_plist' "$script_dir/cpcv-macos-ctl.sh" || \
+/usr/bin/grep -Fq 'owned_plist' "$script_dir/ctrl-ccv-macos-ctl.sh" || \
   die 'Missing controller LaunchAgent ownership guard.'
-/usr/bin/grep -Fq 'config|doctor' "$script_dir/cpcv-macos-ctl.sh" || \
+/usr/bin/grep -Fq 'config|doctor' "$script_dir/ctrl-ccv-macos-ctl.sh" || \
   die 'Controller does not expose Doctor as a recovery capability.'
-/usr/bin/grep -Fq 'settings-read' "$script_dir/cpcv-macos-ctl.sh" && \
-  /usr/bin/grep -Fq 'settings-save' "$script_dir/cpcv-macos-ctl.sh" || \
+/usr/bin/grep -Fq 'settings-read' "$script_dir/ctrl-ccv-macos-ctl.sh" && \
+  /usr/bin/grep -Fq 'settings-save' "$script_dir/ctrl-ccv-macos-ctl.sh" || \
   die 'Controller does not expose the structured settings actions.'
-/usr/bin/grep -Fq 'native_settings_arguments' "$script_dir/cpcv-macos-ctl.sh" || \
+/usr/bin/grep -Fq 'native_settings_arguments' "$script_dir/ctrl-ccv-macos-ctl.sh" || \
   die 'Controller does not preserve settings in an argument array.'
-/usr/bin/grep -Fq 'launchctl kickstart -k' "$script_dir/cpcv-macos-ctl.sh" || \
+/usr/bin/grep -Fq 'launchctl kickstart -k' "$script_dir/ctrl-ccv-macos-ctl.sh" || \
   die 'Controller does not reload an active uploader after settings save.'
 /usr/bin/grep -Fq 'Check & Repair' "$tray_source" || \
   die 'Tray does not expose the compact Doctor action.'
@@ -109,7 +109,7 @@ done
   die 'Tray does not map the cross-platform preset to tmux root/C-v and root/M-v.'
 /usr/bin/grep -Fq 'if action == "apply" { arguments.append("--reload-default-server") }' "$tray_source" || \
   die 'Tray no longer reloads a running tmux server after explicit Install / Apply.'
-/usr/bin/grep -Fq 'tmuxStartupLine = "run-shell ~/.local/lib/cpcv/tmux/cpcv.tmux"' "$tray_source" || \
+/usr/bin/grep -Fq 'tmuxStartupLine = "run-shell ~/.local/lib/ctrl-ccv/tmux/ctrl-ccv.tmux"' "$tray_source" || \
   die 'Tray does not display the user-owned tmux startup line.'
 /usr/bin/grep -Fq 'never edits ~/.tmux.conf' "$tray_source" || \
   die 'Tray does not state the tmux configuration ownership boundary.'
@@ -136,16 +136,16 @@ fi
 if /bin/bash "$tmux_helper" --host host --paste-table root --paste-key C-v --paste-secondary-table root --action status >/dev/null 2>&1; then
   die 'Remote tmux helper accepted a partial secondary binding.'
 fi
-/usr/bin/grep -Fq 'getppid() == guardianPID' "$script_dir/cpcv-macos.swift" || \
+/usr/bin/grep -Fq 'getppid() == guardianPID' "$script_dir/ctrl-ccv-macos.swift" || \
   die 'Watcher does not exit when its guardian exits.'
 /usr/bin/grep -Fq '/bin/sleep 1' "$script_dir/install-macos.sh" || \
   die 'Installer does not wait for a replaced guardian to exit.'
 /usr/bin/grep -Fq 'bootstrapped=0' "$script_dir/install-tray.sh" && \
   /usr/bin/grep -Fq 'launchctl kickstart -k "$domain/$label"' "$script_dir/install-tray.sh" || \
   die 'Tray installer does not retry and confirm its LaunchAgent startup.'
-/usr/bin/grep -Fq 'tmux_helper="$script_dir/deploy-remote-tmux-cpcv-plugin.sh"' "$script_dir/install-tray.sh" || \
+/usr/bin/grep -Fq 'tmux_helper="$script_dir/deploy-remote-tmux-ctrl-ccv-plugin.sh"' "$script_dir/install-tray.sh" || \
   die 'Tray installer does not require the remote tmux helper.'
-for plist_template in "$script_dir/io.cpcv.guardian.plist.template" "$script_dir/io.cpcv.tray.plist.template"; do
+for plist_template in "$script_dir/io.ctrl-ccv.guardian.plist.template" "$script_dir/io.ctrl-ccv.tray.plist.template"; do
   /usr/bin/plutil -lint "$plist_template" >/dev/null || die "Invalid LaunchAgent plist: $plist_template"
   template_path=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PATH' "$plist_template" 2>/dev/null || true)
   [[ "$template_path" == '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' ]] || \
@@ -154,9 +154,9 @@ done
 
 command -v swiftc >/dev/null 2>&1 || \
   die 'Swift compiler not found. Install Xcode Command Line Tools with: xcode-select --install'
-temporary_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/cpcv-macos-test.XXXXXX")
+temporary_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/ctrl-ccv-macos-test.XXXXXX")
 trap '/bin/rm -rf -- "$temporary_directory"' EXIT
-test_binary="$temporary_directory/cpcv-macos"
+test_binary="$temporary_directory/ctrl-ccv-macos"
 fake_tmux_bin="$temporary_directory/fake-tmux-bin"
 fake_tmux_state="$temporary_directory/fake-tmux-state"
 fake_tmux_count="$temporary_directory/fake-tmux-count"
@@ -168,59 +168,59 @@ cat > "$fake_tmux_bin/ssh" <<'FAKE_SSH'
 set -euo pipefail
 arguments="$*"
 if [[ "$arguments" == *'mktemp -d'* ]]; then
-  printf '%s\n' /tmp/cpcv-tmux.ABCD1234
-elif [[ "$arguments" == *'CPCV_STAGE_DIR='* ]]; then
-  [[ -z "${CPCV_FAKE_INSTALL_ARGUMENTS:-}" ]] || printf '%s\n' "$arguments" > "$CPCV_FAKE_INSTALL_ARGUMENTS"
+  printf '%s\n' /tmp/ctrl-ccv-tmux.ABCD1234
+elif [[ "$arguments" == *'CTRL_CCV_STAGE_DIR='* ]]; then
+  [[ -z "${CTRL_CCV_FAKE_INSTALL_ARGUMENTS:-}" ]] || printf '%s\n' "$arguments" > "$CTRL_CCV_FAKE_INSTALL_ARGUMENTS"
   exit 0
 elif [[ "$arguments" == *'find '* ]]; then
   exit 0
 elif [[ "$arguments" == *'/bin/bash -s -- prefix v'* ]]; then
-  case "$(< "$CPCV_FAKE_TMUX_STATE")" in
-    managed) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\tnone\n' ;;
-    override) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\texplicit\n' ;;
-    stopped) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\tstopped\tpending\tnone\tnone\n' ;;
+  case "$(< "$CTRL_CCV_FAKE_TMUX_STATE")" in
+    managed) printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\tnone\n' ;;
+    override) printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\texplicit\n' ;;
+    stopped) printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\tstopped\tpending\tnone\tnone\n' ;;
     race)
       count=0
-      [[ -f "$CPCV_FAKE_TMUX_COUNT" ]] && count=$(< "$CPCV_FAKE_TMUX_COUNT")
+      [[ -f "$CTRL_CCV_FAKE_TMUX_COUNT" ]] && count=$(< "$CTRL_CCV_FAKE_TMUX_COUNT")
       if [[ "$count" == 0 ]]; then
-        printf '%s' 1 > "$CPCV_FAKE_TMUX_COUNT"
-        printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\tnone\n'
+        printf '%s' 1 > "$CTRL_CCV_FAKE_TMUX_COUNT"
+        printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tnone\tnone\n'
       else
-        printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tcollision\tnone\tnone\n'
+        printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\trunning\tcollision\tnone\tnone\n'
       fi
       ;;
     *) exit 2 ;;
   esac
 elif [[ "$arguments" == *'/bin/bash -s -- root C-v root M-v'* ]]; then
-  case "$(< "$CPCV_FAKE_TMUX_STATE")" in
-    managed) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tmanaged\tnone\n' ;;
-    stopped) printf 'CPCV_TMUX_STATE\tinstalled\tinstalled\tstopped\tpending\tpending\tnone\n' ;;
+  case "$(< "$CTRL_CCV_FAKE_TMUX_STATE")" in
+    managed) printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\trunning\tmanaged\tmanaged\tnone\n' ;;
+    stopped) printf 'CTRL_CCV_TMUX_STATE\tinstalled\tinstalled\tstopped\tpending\tpending\tnone\n' ;;
     *) exit 2 ;;
   esac
 elif [[ "$arguments" == *'/bin/bash -s'* ]]; then
-  printf 'CPCV_TMUX_RELOAD\treloaded\n'
+  printf 'CTRL_CCV_TMUX_RELOAD\treloaded\n'
 fi
 FAKE_SSH
 cat > "$fake_tmux_bin/scp" <<'FAKE_SCP'
 #!/usr/bin/env bash
 set -euo pipefail
-: > "$CPCV_FAKE_SCP_MARKER"
+: > "$CTRL_CCV_FAKE_SCP_MARKER"
 FAKE_SCP
 /bin/chmod 700 "$fake_tmux_bin/ssh" "$fake_tmux_bin/scp"
 printf '%s' managed > "$fake_tmux_state"
-CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" CPCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
+CTRL_CCV_FAKE_TMUX_STATE="$fake_tmux_state" CTRL_CCV_FAKE_TMUX_COUNT="$fake_tmux_count" CTRL_CCV_FAKE_SCP_MARKER="$fake_scp_marker" CTRL_CCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
   /bin/bash "$tmux_helper" --host fake-host --action status --format json > "$temporary_directory/tmux-status.json"
 /usr/bin/grep -Fq '"action":"status"' "$temporary_directory/tmux-status.json" && \
   /usr/bin/grep -Fq '"binding":"managed"' "$temporary_directory/tmux-status.json" || \
   die 'Remote tmux helper status did not return bounded JSON.'
 [[ ! -e "$fake_scp_marker" ]] || die 'Remote tmux status unexpectedly staged or copied plugin files.'
-CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" CPCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
+CTRL_CCV_FAKE_TMUX_STATE="$fake_tmux_state" CTRL_CCV_FAKE_TMUX_COUNT="$fake_tmux_count" CTRL_CCV_FAKE_SCP_MARKER="$fake_scp_marker" CTRL_CCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
   /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-apply.json"
 /usr/bin/grep -Fq '"runtime":"reloaded"' "$temporary_directory/tmux-apply.json" && \
   [[ -f "$fake_scp_marker" ]] || die 'Remote tmux apply did not stage and report a reloaded server.'
 /bin/rm -f -- "$fake_scp_marker" "$fake_install_arguments"
 printf '%s' managed > "$fake_tmux_state"
-CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" CPCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
+CTRL_CCV_FAKE_TMUX_STATE="$fake_tmux_state" CTRL_CCV_FAKE_TMUX_COUNT="$fake_tmux_count" CTRL_CCV_FAKE_SCP_MARKER="$fake_scp_marker" CTRL_CCV_FAKE_INSTALL_ARGUMENTS="$fake_install_arguments" PATH="$fake_tmux_bin:$PATH" \
   /bin/bash "$tmux_helper" --host fake-host --paste-table root --paste-key C-v --paste-secondary-table root --paste-secondary-key M-v --action apply --format json > "$temporary_directory/tmux-dual.json"
 /usr/bin/grep -Fq '"secondaryBinding":"managed"' "$temporary_directory/tmux-dual.json" && \
   /usr/bin/grep -Fq -- '--paste-secondary-table' "$fake_install_arguments" && \
@@ -228,7 +228,7 @@ CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" 
   [[ -f "$fake_scp_marker" ]] || die 'Remote tmux helper did not save the cross-platform dual binding.'
 /bin/rm -f -- "$fake_scp_marker" "$fake_install_arguments"
 printf '%s' override > "$fake_tmux_state"
-if CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
+if CTRL_CCV_FAKE_TMUX_STATE="$fake_tmux_state" CTRL_CCV_FAKE_TMUX_COUNT="$fake_tmux_count" CTRL_CCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
   /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-override.json" 2>&1; then
   die 'Remote tmux helper installed despite an explicit user-owned override.'
 fi
@@ -237,7 +237,7 @@ fi
 [[ ! -e "$fake_scp_marker" ]] || die 'Remote tmux helper staged files despite an explicit user-owned override.'
 /bin/rm -f -- "$fake_tmux_count" "$fake_scp_marker" "$fake_install_arguments"
 printf '%s' race > "$fake_tmux_state"
-if CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
+if CTRL_CCV_FAKE_TMUX_STATE="$fake_tmux_state" CTRL_CCV_FAKE_TMUX_COUNT="$fake_tmux_count" CTRL_CCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
   /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-race.json" 2>&1; then
   die 'Remote tmux helper did not report a post-install binding collision.'
 fi
@@ -246,37 +246,37 @@ fi
   [[ -f "$fake_scp_marker" ]] || die 'Remote tmux helper did not distinguish a post-install binding collision.'
 /bin/rm -f -- "$fake_scp_marker"
 printf '%s' stopped > "$fake_tmux_state"
-CPCV_FAKE_TMUX_STATE="$fake_tmux_state" CPCV_FAKE_TMUX_COUNT="$fake_tmux_count" CPCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
+CTRL_CCV_FAKE_TMUX_STATE="$fake_tmux_state" CTRL_CCV_FAKE_TMUX_COUNT="$fake_tmux_count" CTRL_CCV_FAKE_SCP_MARKER="$fake_scp_marker" PATH="$fake_tmux_bin:$PATH" \
   /bin/bash "$tmux_helper" --host fake-host --action apply --reload-default-server --format json > "$temporary_directory/tmux-stopped.json"
 /usr/bin/grep -Fq '"runtime":"saved-next-server"' "$temporary_directory/tmux-stopped.json" && \
   /usr/bin/grep -Fq '"applied":true' "$temporary_directory/tmux-stopped.json" && \
   [[ -f "$fake_scp_marker" ]] || die 'Remote tmux helper did not distinguish a saved binding from an active server reload.'
 swiftc -O -framework AppKit "$source_file" -o "$test_binary"
-swiftc -O -parse-as-library -framework AppKit "$tray_source" -o "$temporary_directory/cpcv-tray"
+swiftc -O -parse-as-library -framework AppKit "$tray_source" -o "$temporary_directory/ctrl-ccv-tray"
 
 "$test_binary" self-test
-"$temporary_directory/cpcv-tray" self-test
-cp "$script_dir/cpcv.macos.config.example.json" "$temporary_directory/config.json"
-CPCV_CONFIG="$temporary_directory/config.json" "$test_binary" validate-config
+"$temporary_directory/ctrl-ccv-tray" self-test
+cp "$script_dir/ctrl-ccv.macos.config.example.json" "$temporary_directory/config.json"
+CTRL_CCV_CONFIG="$temporary_directory/config.json" "$test_binary" validate-config
 printf '%s\n' '{"hostAlias":"host;unsafe"}' > "$temporary_directory/invalid-config.json"
-if CPCV_CONFIG="$temporary_directory/invalid-config.json" "$test_binary" validate-config; then
+if CTRL_CCV_CONFIG="$temporary_directory/invalid-config.json" "$test_binary" validate-config; then
   die 'Native configuration validation accepted a hostile host alias.'
 fi
 settings_config="$temporary_directory/settings-config.json"
 printf '%s\n' '{"hostAlias":"old-host","remoteDir":"old-images","remoteHome":"","pollIntervalSeconds":2,"futureSetting":{"keep":true}}' > "$settings_config"
 settings_read="$temporary_directory/settings-read.json"
-CPCV_CONFIG="$settings_config" "$test_binary" settings-read > "$settings_read"
+CTRL_CCV_CONFIG="$settings_config" "$test_binary" settings-read > "$settings_read"
 /usr/bin/grep -Fq '"hostAlias":"old-host"' "$settings_read" || \
   die 'Native settings read did not return the configured SSH target.'
-CPCV_CONFIG="$settings_config" "$test_binary" settings-save \
-  --host-alias 'me@work-server' --remote-dir 'images/clipboard' --remote-home '/srv/cpcv' \
+CTRL_CCV_CONFIG="$settings_config" "$test_binary" settings-save \
+  --host-alias 'me@work-server' --remote-dir 'images/clipboard' --remote-home '/srv/ctrl-ccv' \
   --poll-interval-seconds 7 >/dev/null
-CPCV_CONFIG="$settings_config" "$test_binary" validate-config
+CTRL_CCV_CONFIG="$settings_config" "$test_binary" validate-config
 /usr/bin/grep -Fq '"hostAlias":"me@work-server"' "$settings_config" || \
   die 'Native settings save did not update the SSH target.'
 /usr/bin/grep -Fq '"futureSetting":{"keep":true}' "$settings_config" || \
   die 'Native settings save did not preserve an unrelated JSON setting.'
-if CPCV_CONFIG="$settings_config" "$test_binary" settings-save \
+if CTRL_CCV_CONFIG="$settings_config" "$test_binary" settings-save \
   --host-alias 'host;unsafe' --remote-dir 'images' --remote-home '' --poll-interval-seconds 2 2>/dev/null; then
   die 'Native settings save accepted a hostile SSH target.'
 fi
@@ -285,12 +285,12 @@ fi
 [[ "$(/usr/bin/stat -f '%Lp' "$settings_config")" == '600' ]] || \
   die 'Native settings save did not keep the configuration private.'
 /bin/ln -s "$settings_config" "$temporary_directory/settings-link.json"
-if CPCV_CONFIG="$temporary_directory/settings-link.json" "$test_binary" settings-read >/dev/null 2>&1; then
+if CTRL_CCV_CONFIG="$temporary_directory/settings-link.json" "$test_binary" settings-read >/dev/null 2>&1; then
   die 'Native settings read accepted a symlinked configuration file.'
 fi
 invalid_advanced_config="$temporary_directory/invalid-advanced-settings.json"
 printf '%s\n' '{"hostAlias":"old-host","remoteDir":"old-images","remoteHome":"","pollIntervalSeconds":2,"commandTimeoutSeconds":601}' > "$invalid_advanced_config"
-if CPCV_CONFIG="$invalid_advanced_config" "$test_binary" settings-save \
+if CTRL_CCV_CONFIG="$invalid_advanced_config" "$test_binary" settings-save \
   --host-alias 'new-host' --remote-dir 'images' --remote-home '' --poll-interval-seconds 2 2>/dev/null; then
   die 'Native settings save accepted an unrelated invalid configuration value.'
 fi

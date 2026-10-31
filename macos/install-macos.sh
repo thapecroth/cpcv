@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and install the per-user macOS cpcv guardian.
+# Build and install the per-user macOS ctrl-ccv guardian.
 #
 # This installer intentionally uses a LaunchAgent in the current user's GUI
 # launchd domain. It never evaluates configuration as shell code: the native
@@ -9,10 +9,10 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 077
 
-readonly label='io.cpcv.guardian'
+readonly label='io.ctrl-ccv.guardian'
 
 die() {
-  printf 'cpcv install: %s\n' "$*" >&2
+  printf 'ctrl-ccv install: %s\n' "$*" >&2
   exit 1
 }
 
@@ -20,7 +20,7 @@ usage() {
   cat <<'USAGE'
 Usage: ./macos/install-macos.sh [--config /absolute/path/config.json] [--no-start] [--prebuilt]
 
-By default, builds macos/cpcv-macos.swift into macos/build/cpcv-macos. With
+By default, builds macos/ctrl-ccv-macos.swift into macos/build/ctrl-ccv-macos. With
 --prebuilt, validates and uses the regular bundled executable already at that
 path without invoking swiftc. It creates a private default configuration when
 needed and installs a LaunchAgent in the current logged-in user's GUI launchd
@@ -84,10 +84,10 @@ write_plist() {
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
-      *'__CPCV_EXECUTABLE__'*) printf '    <string>%s</string>\n' "$executable_xml" ;;
-      *'__CPCV_CONFIG__'*) printf '    <string>%s</string>\n' "$config_xml" ;;
-      *'__CPCV_PROJECT_ROOT__'*) printf '  <string>%s</string>\n' "$root_xml" ;;
-      *'__CPCV_LAUNCHD_LOG__'*) printf '  <string>%s</string>\n' "$log_xml" ;;
+      *'__CTRL_CCV_EXECUTABLE__'*) printf '    <string>%s</string>\n' "$executable_xml" ;;
+      *'__CTRL_CCV_CONFIG__'*) printf '    <string>%s</string>\n' "$config_xml" ;;
+      *'__CTRL_CCV_PROJECT_ROOT__'*) printf '  <string>%s</string>\n' "$root_xml" ;;
+      *'__CTRL_CCV_LAUNCHD_LOG__'*) printf '  <string>%s</string>\n' "$log_xml" ;;
       *) printf '%s\n' "$line" ;;
     esac
   done < "$template" > "$output"
@@ -96,14 +96,14 @@ write_plist() {
 is_managed_plist() {
   local candidate=$1
   [[ -f "$candidate" && ! -L "$candidate" ]] && \
-    /usr/bin/grep -Fq 'Managed by cpcv install-macos.sh' "$candidate"
+    /usr/bin/grep -Fq 'Managed by ctrl-ccv install-macos.sh' "$candidate"
 }
 
 job_loaded() {
   /bin/launchctl print "$domain/$label" >/dev/null 2>&1
 }
 
-config_override=${CPCV_CONFIG:-}
+config_override=${CTRL_CCV_CONFIG:-}
 start_after_install=1
 use_prebuilt=0
 while (($#)); do
@@ -142,13 +142,13 @@ case "$script_path" in
 esac
 script_dir=$(CDPATH= cd -P -- "$script_parent" && /bin/pwd -P)
 project_root=$(CDPATH= cd -P -- "$script_dir/.." && /bin/pwd -P)
-source_file="$script_dir/cpcv-macos.swift"
-template="$script_dir/io.cpcv.guardian.plist.template"
-example_config="$script_dir/cpcv.macos.config.example.json"
+source_file="$script_dir/ctrl-ccv-macos.swift"
+template="$script_dir/io.ctrl-ccv.guardian.plist.template"
+example_config="$script_dir/ctrl-ccv.macos.config.example.json"
 build_dir="$script_dir/build"
-executable="$build_dir/cpcv-macos"
+executable="$build_dir/ctrl-ccv-macos"
 app_support="$home_dir/Library/Application Support"
-state_dir="$app_support/cpcv"
+state_dir="$app_support/ctrl-ccv"
 default_config="$state_dir/config.json"
 config_pointer="$state_dir/launchd-config-path"
 launch_agents="$home_dir/Library/LaunchAgents"
@@ -164,7 +164,7 @@ fi
 [[ -f "$example_config" ]] || die "Missing configuration example: $example_config"
 
 # A label is global within a GUI launchd domain. Do not unload a job merely
-# because it happens to use cpcv's label; prove this checkout owns the
+# because it happens to use ctrl-ccv's label; prove this checkout owns the
 # on-disk plist before replacing or booting out anything.
 [[ ! -L "$launch_agents" ]] || die "Refusing symlinked LaunchAgents directory: $launch_agents"
 existing_managed_plist=0
@@ -183,7 +183,7 @@ fi
 
 if [[ -n "$config_override" ]]; then
   config_file=$(absolute_existing_file "$config_override") || \
-    die 'CPCV_CONFIG/--config must name an existing, non-symlinked absolute JSON file.'
+    die 'CTRL_CCV_CONFIG/--config must name an existing, non-symlinked absolute JSON file.'
 else
   if [[ ! -e "$default_config" ]]; then
     /usr/bin/install -m 600 "$example_config" "$default_config"
@@ -214,13 +214,13 @@ if (( use_prebuilt )); then
     die 'The bundled native executable did not pass its self-test.'
   printf '%s\n' 'Using the bundled prebuilt macOS executable (ad-hoc signed; not notarized).'
 else
-  build_tmp=$(/usr/bin/mktemp -d "$build_dir/.cpcv-build.XXXXXX")
+  build_tmp=$(/usr/bin/mktemp -d "$build_dir/.ctrl-ccv-build.XXXXXX")
   trap '/bin/rm -rf -- "$build_tmp"' EXIT
-  swiftc -O -framework AppKit "$source_file" -o "$build_tmp/cpcv-macos"
-  [[ -x "$build_tmp/cpcv-macos" ]] || die 'Swift compilation did not produce an executable.'
-  "$build_tmp/cpcv-macos" self-test >/dev/null
-  /bin/chmod 700 "$build_tmp/cpcv-macos"
-  /bin/mv -f -- "$build_tmp/cpcv-macos" "$executable"
+  swiftc -O -framework AppKit "$source_file" -o "$build_tmp/ctrl-ccv-macos"
+  [[ -x "$build_tmp/ctrl-ccv-macos" ]] || die 'Swift compilation did not produce an executable.'
+  "$build_tmp/ctrl-ccv-macos" self-test >/dev/null
+  /bin/chmod 700 "$build_tmp/ctrl-ccv-macos"
+  /bin/mv -f -- "$build_tmp/ctrl-ccv-macos" "$executable"
   /bin/rmdir -- "$build_tmp"
   trap - EXIT
 fi
