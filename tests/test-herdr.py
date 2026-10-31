@@ -277,7 +277,11 @@ class DeploymentTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="cpcv-h-deploy-", dir="/tmp")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.stage = Path(tempfile.mkdtemp(prefix="cpcv-herdr.", dir="/tmp"))
+        # Match the actual remote mktemp alphabet. Python's tempfile suffixes
+        # can contain underscores, which the deployment transport rejects.
+        self.stage = Path(subprocess.check_output(
+            ["mktemp", "-d", "/tmp/cpcv-herdr.XXXXXXXX"], text=True,
+        ).strip())
         self.addCleanup(lambda: shutil.rmtree(self.stage, ignore_errors=True))
         self.bin = self.root / "bin"
         self.bin.mkdir()
