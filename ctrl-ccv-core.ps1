@@ -1389,7 +1389,8 @@ function Invoke-CtrlCcvClipboardUpload {
     # A server's home can contain Unicode even though configured/pasteable
     # paths use a narrow alphabet. Keep verification, but have the remote shell
     # emit the safe tilde path when its resolved home cannot be represented.
-    $remoteCmd = 'ln -sfn {0} "$HOME/{1}/latest.png" && test "$(readlink "$HOME/{1}/latest.png")" = "{0}" && {{ LC_ALL=C; export LC_ALL; ctrl_ccv_path=$(readlink -f "$HOME/{1}/{0}" 2>/dev/null) || ctrl_ccv_path="$HOME/{1}/{0}"; case "$ctrl_ccv_path" in /*) case "$ctrl_ccv_path" in *[!A-Za-z0-9._/-]*) ctrl_ccv_path="~/{1}/{0}" ;; esac ;; *) ctrl_ccv_path="~/{1}/{0}" ;; esac; printf ''CTRL_CCV_UPLOAD_OK %s\n'' "$ctrl_ccv_path"; }}' -f $base, $remoteDir
+    $acknowledgmentPrefix = 'CTRL_CCV_UPLOAD_OK '
+    $remoteCmd = 'ln -sfn {0} "$HOME/{1}/latest.png" && test "$(readlink "$HOME/{1}/latest.png")" = "{0}" && {{ LC_ALL=C; export LC_ALL; ctrl_ccv_path=$(readlink -f "$HOME/{1}/{0}" 2>/dev/null) || ctrl_ccv_path="$HOME/{1}/{0}"; case "$ctrl_ccv_path" in /*) case "$ctrl_ccv_path" in *[!A-Za-z0-9._/-]*) ctrl_ccv_path="~/{1}/{0}" ;; esac ;; *) ctrl_ccv_path="~/{1}/{0}" ;; esac; printf ''{2}%s\n'' "$ctrl_ccv_path"; }}' -f $base, $remoteDir, $acknowledgmentPrefix
     Update-CtrlCcvUploadHeartbeat
     $remote = Invoke-CtrlCcvProcess -FilePath "ssh" -Arguments ($sshOpts + @($hostAlias, $remoteCmd)) -Label "ssh update latest"
     if (-not $remote.Ok) {
@@ -1398,8 +1399,8 @@ function Invoke-CtrlCcvClipboardUpload {
         Prune-CtrlCcvCache -KeepPath $localFile
         return $failure
     }
-    $acknowledgments = @(([string]$remote.StdOut -split "`r?`n") | Where-Object { $_ -cmatch '^CTRL_CCV_UPLOAD_OK ' })
-    $remotePath = if ($acknowledgments.Count -eq 1) { $acknowledgments[0].Substring(15).Trim() } else { "" }
+    $acknowledgments = @(([string]$remote.StdOut -split "`r?`n") | Where-Object { $_.StartsWith($acknowledgmentPrefix, [StringComparison]::Ordinal) })
+    $remotePath = if ($acknowledgments.Count -eq 1) { $acknowledgments[0].Substring($acknowledgmentPrefix.Length).Trim() } else { "" }
     if ($remote.OutputTruncated -or -not (Test-CtrlCcvRemotePath $remotePath) -or [IO.Path]::GetFileName($remotePath) -cne $base) {
         $detail = "The remote image publication could not be verified; leaving retry state unchanged."
         Write-CtrlCcvLog "latest-link update failed: $detail"
